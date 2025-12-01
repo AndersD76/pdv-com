@@ -20,7 +20,19 @@ import {
   TableCell,
   TableEmpty
 } from '../../components/ui';
-import type { Sale, PaymentMethod, Seller } from '../../types';
+import { PaymentMethod } from '../../types';
+import type { Sale, Seller, SellerCommission } from '../../types';
+
+interface CommissionReportItem {
+  seller: Seller;
+  commissions: SellerCommission[];
+  totals: {
+    total_comissao: number;
+    total_pago: number;
+    total_pendente: number;
+    total_vendas: number;
+  };
+}
 
 const paymentLabels: Record<PaymentMethod, string> = {
   DINHEIRO: 'Dinheiro',
@@ -67,23 +79,36 @@ export default function Relatorios() {
     queryFn: () => suppliersApi.getAll(),
   });
 
-  const { data: commissionReport, refetch: refetchCommissions } = useQuery({
+  const { data: commissionReport, refetch: refetchCommissions } = useQuery<CommissionReportItem[]>({
     queryKey: ['commissionReport', vendedoraId, inicio, fim, statusPagamento],
-    queryFn: async () => {
+    queryFn: async (): Promise<CommissionReportItem[]> => {
       if (!vendedoraId) {
         // Buscar de todas as vendedoras
         const allSellers = await sellersApi.getAll();
         const reports = await Promise.all(
-          allSellers.map(async (seller: Seller) => {
+          allSellers.map(async (s: Seller): Promise<CommissionReportItem> => {
             try {
-              const report = await sellersApi.getCommissions(seller.id, {
+              const report = await sellersApi.getCommissions(s.id, {
                 inicio,
                 fim,
                 pago: statusPagamento === 'todos' ? undefined : statusPagamento === 'pago'
               });
-              return { seller, ...report };
+              return {
+                seller: s,
+                commissions: report.commissions || [],
+                totals: {
+                  total_comissao: Number(report.totals?.total_comissao) || 0,
+                  total_pago: Number(report.totals?.total_pago) || 0,
+                  total_pendente: Number(report.totals?.total_pendente) || 0,
+                  total_vendas: Number(report.totals?.total_vendas) || 0,
+                }
+              };
             } catch {
-              return { seller, commissions: [], totals: { total: 0, pago: 0, pendente: 0 } };
+              return {
+                seller: s,
+                commissions: [],
+                totals: { total_comissao: 0, total_pago: 0, total_pendente: 0, total_vendas: 0 }
+              };
             }
           })
         );
@@ -94,7 +119,16 @@ export default function Relatorios() {
         fim,
         pago: statusPagamento === 'todos' ? undefined : statusPagamento === 'pago'
       });
-      return [report];
+      return [{
+        seller: report.seller,
+        commissions: report.commissions || [],
+        totals: {
+          total_comissao: Number(report.totals?.total_comissao) || 0,
+          total_pago: Number(report.totals?.total_pago) || 0,
+          total_pendente: Number(report.totals?.total_pendente) || 0,
+          total_vendas: Number(report.totals?.total_vendas) || 0,
+        }
+      }];
     },
     enabled: activeTab === 'comissoes',
   });
@@ -364,8 +398,7 @@ export default function Relatorios() {
               <p className="text-sm text-gray-600">Total em Comissões</p>
               <p className="text-2xl font-bold text-primary-600">
                 {formatCurrency(
-                  commissionReport?.reduce((acc: number, r: { totals?: { total_comissao?: number } }) =>
-                    acc + (r.totals?.total_comissao || 0), 0) || 0
+                  commissionReport?.reduce((acc, r) => acc + (r.totals?.total_comissao || 0), 0) || 0
                 )}
               </p>
             </div>
@@ -373,8 +406,7 @@ export default function Relatorios() {
               <p className="text-sm text-gray-600">Comissões Pagas</p>
               <p className="text-2xl font-bold text-green-600">
                 {formatCurrency(
-                  commissionReport?.reduce((acc: number, r: { totals?: { total_pago?: number } }) =>
-                    acc + (r.totals?.total_pago || 0), 0) || 0
+                  commissionReport?.reduce((acc, r) => acc + (r.totals?.total_pago || 0), 0) || 0
                 )}
               </p>
             </div>
@@ -382,8 +414,7 @@ export default function Relatorios() {
               <p className="text-sm text-gray-600">Comissões Pendentes</p>
               <p className="text-2xl font-bold text-orange-600">
                 {formatCurrency(
-                  commissionReport?.reduce((acc: number, r: { totals?: { total_pendente?: number } }) =>
-                    acc + (r.totals?.total_pendente || 0), 0) || 0
+                  commissionReport?.reduce((acc, r) => acc + (r.totals?.total_pendente || 0), 0) || 0
                 )}
               </p>
             </div>
@@ -409,8 +440,8 @@ export default function Relatorios() {
                   <TableEmpty message="Nenhuma comissão no período" />
                 ) : (
                   commissionReport
-                    .filter((r: { totals?: { total_comissao?: number } }) => (r.totals?.total_comissao || 0) > 0)
-                    .map((report: { seller: Seller; commissions: unknown[]; totals: { total_comissao: number; total_pago: number; total_pendente: number; total_vendas: number } }) => (
+                    .filter((r) => (r.totals?.total_comissao || 0) > 0)
+                    .map((report) => (
                       <TableRow key={report.seller.id}>
                         <TableCell className="font-medium">{report.seller.nome}</TableCell>
                         <TableCell>{report.totals?.total_vendas || 0}</TableCell>

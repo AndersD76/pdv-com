@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Package } from 'lucide-react';
 import { productsApi } from '../services/api';
-import { Button, Input, Select, Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading } from '../components/ui';
+import { Input, Select, Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading } from '../components/ui';
 import type { Product, ProductStatus } from '../types';
 
 const statusColors: Record<ProductStatus, string> = {

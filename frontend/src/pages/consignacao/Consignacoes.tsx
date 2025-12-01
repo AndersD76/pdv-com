@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Search, Eye, FileText, Tags } from 'lucide-react';
+import { Plus, Search, Eye, Tags } from 'lucide-react';
 import { consignmentsApi, suppliersApi } from '../../services/api';
 import { Button, Input, Select, Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading } from '../../components/ui';
 import type { ConsignmentList, ListStatus, Supplier } from '../../types';

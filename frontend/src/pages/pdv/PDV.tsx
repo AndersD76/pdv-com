@@ -8,13 +8,13 @@ import {
   Banknote,
   Smartphone,
   X,
-  Check,
   User
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { productsApi, salesApi, sellersApi } from '../../services/api';
-import { Button, Input, Select, Modal, ModalFooter } from '../../components/ui';
-import type { Product, CartItem, PaymentMethod, Seller } from '../../types';
+import { Button, Input, Select, Modal } from '../../components/ui';
+import { PaymentMethod } from '../../types';
+import type { Product, CartItem, Seller } from '../../types';
 
 export default function PDV() {
   const queryClient = useQueryClient();
@@ -26,7 +26,6 @@ export default function PDV() {
   const [discount, setDiscount] = useState(0);
   const [selectedSeller, setSelectedSeller] = useState<number | null>(null);
   const [clientName, setClientName] = useState('');
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
 
   // Buscar vendedoras ativas
@@ -64,7 +63,6 @@ export default function PDV() {
       setCart([]);
       setDiscount(0);
       setClientName('');
-      setShowPaymentModal(false);
       queryClient.invalidateQueries({ queryKey: ['quickStats'] });
       barcodeInputRef.current?.focus();
     },
@@ -308,7 +306,7 @@ export default function PDV() {
 
           <div className="grid grid-cols-2 gap-3">
             <button
-              onClick={() => handleFinalizeSale('DINHEIRO')}
+              onClick={() => handleFinalizeSale(PaymentMethod.DINHEIRO)}
               disabled={cart.length === 0 || createSale.isPending}
               className="p-4 border-2 border-gray-200 rounded-xl hover:border-green-500 hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -317,7 +315,7 @@ export default function PDV() {
             </button>
 
             <button
-              onClick={() => handleFinalizeSale('PIX')}
+              onClick={() => handleFinalizeSale(PaymentMethod.PIX)}
               disabled={cart.length === 0 || createSale.isPending}
               className="p-4 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:bg-primary-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -326,7 +324,7 @@ export default function PDV() {
             </button>
 
             <button
-              onClick={() => handleFinalizeSale('CARTAO_CREDITO')}
+              onClick={() => handleFinalizeSale(PaymentMethod.CARTAO_CREDITO)}
               disabled={cart.length === 0 || createSale.isPending}
               className="p-4 border-2 border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -335,7 +333,7 @@ export default function PDV() {
             </button>
 
             <button
-              onClick={() => handleFinalizeSale('CARTAO_DEBITO')}
+              onClick={() => handleFinalizeSale(PaymentMethod.CARTAO_DEBITO)}
               disabled={cart.length === 0 || createSale.isPending}
               className="p-4 border-2 border-gray-200 rounded-xl hover:border-orange-500 hover:bg-orange-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Edit2, Trash2, FileText } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { suppliersApi } from '../../services/api';
 import {

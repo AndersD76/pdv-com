@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Plus, Trash2, Edit2, Tags, FileText, RotateCcw,
-  Check, Package, AlertTriangle, Download
+  Check, Download
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { consignmentsApi, auxiliariesApi } from '../../services/api';
@@ -12,7 +12,8 @@ import {
   Button, Input, Select, Modal, ModalFooter,
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty
 } from '../../components/ui';
-import type { Product, ProductCondition, ListStatus } from '../../types';
+import { ProductCondition, ListStatus } from '../../types';
+import type { Product } from '../../types';
 
 const conditionLabels: Record<ProductCondition, string> = {
   NOVA: 'Nova',
@@ -38,7 +39,7 @@ export default function ConsignacaoDetalhe() {
     cor: '',
     marca: '',
     tamanho: '',
-    condicao: 'SEMI_NOVA' as ProductCondition,
+    condicao: ProductCondition.SEMI_NOVA,
     defeitos: '',
     valor_compra: '',
     valor_venda: '',
@@ -118,7 +119,7 @@ export default function ConsignacaoDetalhe() {
       cor: '',
       marca: '',
       tamanho: '',
-      condicao: 'SEMI_NOVA',
+      condicao: ProductCondition.SEMI_NOVA,
       defeitos: '',
       valor_compra: '',
       valor_venda: '',
@@ -257,7 +258,7 @@ export default function ConsignacaoDetalhe() {
         </div>
         <div className="flex items-center gap-2">
           {list.status === 'DIGITADA' && products.length > 0 && (
-            <Button variant="secondary" onClick={() => updateStatus.mutate('EXPORTADA')}>
+            <Button variant="secondary" onClick={() => updateStatus.mutate(ListStatus.EXPORTADA)}>
               <FileText className="w-4 h-4 mr-2" />
               Marcar como Exportada
             </Button>
@@ -276,7 +277,7 @@ export default function ConsignacaoDetalhe() {
             </Button>
           )}
           {list.status !== 'FINALIZADA' && availableProducts.length === 0 && products.length > 0 && (
-            <Button variant="success" onClick={() => updateStatus.mutate('FINALIZADA')}>
+            <Button variant="success" onClick={() => updateStatus.mutate(ListStatus.FINALIZADA)}>
               <Check className="w-4 h-4 mr-2" />
               Finalizar Lista
             </Button>

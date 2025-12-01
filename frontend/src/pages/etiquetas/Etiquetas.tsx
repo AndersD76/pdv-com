@@ -5,7 +5,7 @@ import { Printer, Tags, Settings } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import { useReactToPrint } from 'react-to-print';
 import { consignmentsApi, productsApi } from '../../services/api';
-import { Button, Select, Input } from '../../components/ui';
+import { Button, Select } from '../../components/ui';
 import type { ConsignmentList, Product } from '../../types';
 
 // Tamanhos de etiqueta comuns para Argox (em mm)
@@ -42,7 +42,7 @@ export default function Etiquetas() {
   });
 
   const handlePrint = useReactToPrint({
-    contentRef: printRef,
+    content: () => printRef.current,
     documentTitle: `Etiquetas_${labelsData?.list?.codigo || 'lista'}`,
     pageStyle: `
       @page {

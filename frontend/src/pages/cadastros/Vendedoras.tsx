@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, DollarSign } from 'lucide-react';
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { sellersApi } from '../../services/api';
 import {
