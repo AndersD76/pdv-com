@@ -1,6 +1,7 @@
 {
   "name": "pdv-brecho-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "Backend do Sistema PDV para Brechó com Consignação",
   "main": "dist/server.js",
   "scripts": {

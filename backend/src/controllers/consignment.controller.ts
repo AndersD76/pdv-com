@@ -488,22 +488,26 @@ export async function getPaymentReport(req: Request, res: Response) {
 
     queryStr += ' ORDER BY cl.data_recebimento DESC';
 
-    const lists = await sql(queryStr, params);
+    const lists = await sql(queryStr, params) as Array<{
+      valor_a_pagar: string | number;
+      valor_pago: string | number;
+      pago: boolean;
+      [key: string]: unknown;
+    }>;
 
     // Totais
-    const totalAPagar = lists.reduce((sum: number, l: { valor_a_pagar: string | number }) =>
-      sum + (Number(l.valor_a_pagar) || 0), 0);
-    const totalPago = lists.filter((l: { pago: boolean }) => l.pago)
-      .reduce((sum: number, l: { valor_pago: string | number }) => sum + (Number(l.valor_pago) || 0), 0);
-    const totalPendente = lists.filter((l: { pago: boolean }) => !l.pago)
-      .reduce((sum: number, l: { valor_a_pagar: string | number }) => sum + (Number(l.valor_a_pagar) || 0), 0);
+    const totalAPagar = lists.reduce((sum, l) => sum + (Number(l.valor_a_pagar) || 0), 0);
+    const totalPago = lists.filter(l => l.pago)
+      .reduce((sum, l) => sum + (Number(l.valor_pago) || 0), 0);
+    const totalPendente = lists.filter(l => !l.pago)
+      .reduce((sum, l) => sum + (Number(l.valor_a_pagar) || 0), 0);
 
     res.json({
       lists,
       totals: {
         total_listas: lists.length,
-        listas_pagas: lists.filter((l: { pago: boolean }) => l.pago).length,
-        listas_pendentes: lists.filter((l: { pago: boolean }) => !l.pago).length,
+        listas_pagas: lists.filter(l => l.pago).length,
+        listas_pendentes: lists.filter(l => !l.pago).length,
         total_a_pagar: totalAPagar,
         total_pago: totalPago,
         total_pendente: totalPendente
