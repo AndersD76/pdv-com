@@ -52,27 +52,30 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 // Inicialização
 async function start() {
+  // Iniciar servidor primeiro (para healthcheck funcionar)
+  const server = app.listen(PORT, () => {
+    console.log(`\n========================================`);
+    console.log(`  PDV COM - Backend`);
+    console.log(`  Servidor rodando na porta ${PORT}`);
+    console.log(`  http://localhost:${PORT}`);
+    console.log(`========================================\n`);
+  });
+
+  // Depois conectar ao banco de dados
   try {
-    // Testar conexão com o banco
     const connected = await testConnection();
     if (!connected) {
       console.error('Não foi possível conectar ao banco de dados. Verifique a configuração.');
+      server.close();
       process.exit(1);
     }
 
     // Inicializar banco de dados (criar tabelas)
     await initializeDatabase();
-
-    // Iniciar servidor
-    app.listen(PORT, () => {
-      console.log(`\n========================================`);
-      console.log(`  PDV COM - Backend`);
-      console.log(`  Servidor rodando na porta ${PORT}`);
-      console.log(`  http://localhost:${PORT}`);
-      console.log(`========================================\n`);
-    });
+    console.log('Servidor pronto para receber requisições!');
   } catch (error) {
-    console.error('Erro ao iniciar o servidor:', error);
+    console.error('Erro ao conectar ao banco de dados:', error);
+    server.close();
     process.exit(1);
   }
 }
