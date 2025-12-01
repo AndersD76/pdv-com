@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { sql } from '../database.js';
+import { sql, query } from '../database.js';
 import { z } from 'zod';
 
 // Helper para converter valores numéricos (Neon retorna DECIMAL como string)
@@ -74,7 +74,7 @@ export async function getAll(req: Request, res: Response) {
 
     queryStr += ' ORDER BY s.data_venda DESC LIMIT 500';
 
-    const sales = await sql(queryStr, params);
+    const sales = await query(queryStr, params);
     res.json(sales);
   } catch (error) {
     console.error('Erro ao listar vendas:', error);
@@ -125,13 +125,13 @@ export async function create(req: Request, res: Response) {
 
     const products = await sql`
       SELECT id, status, valor_venda FROM products WHERE id = ANY(${productIds}::int[])
-    `;
+    ` as Array<{ id: number; status: string; valor_venda: number }>;
 
     if (products.length !== productIds.length) {
       return res.status(400).json({ error: 'Um ou mais produtos não foram encontrados' });
     }
 
-    const unavailableProducts = products.filter(p => p.status !== 'DISPONIVEL');
+    const unavailableProducts = products.filter((p) => p.status !== 'DISPONIVEL');
     if (unavailableProducts.length > 0) {
       return res.status(400).json({ error: 'Um ou mais produtos não estão disponíveis para venda' });
     }
@@ -269,8 +269,8 @@ export async function getDailySalesReport(req: Request, res: Response) {
 
     res.json({
       date: targetDate,
-      sales: sales.map((s: Record<string, unknown>) => parseNumericFields(s)),
-      totals: parseNumericFields(totals)
+      sales: (sales as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
+      totals: parseNumericFields(totals as Record<string, unknown>)
     });
   } catch (error) {
     console.error('Erro ao gerar relatório diário:', error);
@@ -329,10 +329,10 @@ export async function getSalesReport(req: Request, res: Response) {
 
     res.json({
       periodo: { inicio, fim },
-      totals: parseNumericFields(totals),
-      byPaymentMethod: byPaymentMethod.map((p: Record<string, unknown>) => parseNumericFields(p)),
-      bySeller: bySeller.map((s: Record<string, unknown>) => parseNumericFields(s)),
-      topProducts: topProducts.map((p: Record<string, unknown>) => parseNumericFields(p))
+      totals: parseNumericFields(totals as Record<string, unknown>),
+      byPaymentMethod: (byPaymentMethod as Record<string, unknown>[]).map((p) => parseNumericFields(p)),
+      bySeller: (bySeller as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
+      topProducts: (topProducts as Record<string, unknown>[]).map((p) => parseNumericFields(p))
     });
   } catch (error) {
     console.error('Erro ao gerar relatório:', error);

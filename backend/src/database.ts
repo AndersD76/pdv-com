@@ -1,4 +1,4 @@
-import { neon, neonConfig } from '@neondatabase/serverless';
+import { neon, neonConfig, NeonQueryFunction } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -13,15 +13,39 @@ if (!DATABASE_URL) {
   console.error('Variáveis de ambiente disponíveis:', Object.keys(process.env).filter(k => !k.includes('SECRET') && !k.includes('PASSWORD')));
 }
 
-// Cliente SQL do Neon (criado apenas se DATABASE_URL existir)
-export const sql = DATABASE_URL ? neon(DATABASE_URL) : (() => {
-  throw new Error('DATABASE_URL não configurada');
-}) as ReturnType<typeof neon>;
+// Cliente SQL do Neon
+const neonClient: NeonQueryFunction<false, false> | null = DATABASE_URL ? neon(DATABASE_URL) : null;
 
-// Função para executar queries
-export async function query<T>(queryString: string, params: unknown[] = []): Promise<T[]> {
+// Wrapper para garantir que o cliente existe
+function getSql(): NeonQueryFunction<false, false> {
+  if (!neonClient) {
+    throw new Error('DATABASE_URL não configurada');
+  }
+  return neonClient;
+}
+
+// Exportar sql como tagged template function
+export const sql = getSql();
+
+// Tipo para os resultados das queries
+type QueryResult = Record<string, unknown>[];
+
+// Função para executar queries com parâmetros dinâmicos
+export async function query<T = Record<string, unknown>>(queryString: string, params: unknown[] = []): Promise<T[]> {
+  const client = getSql();
   try {
-    const result = await sql(queryString, params);
+    // Criar template literal fake para o cliente Neon
+    const templateStrings = [queryString] as unknown as TemplateStringsArray;
+    // Se não há parâmetros, executar diretamente
+    if (params.length === 0) {
+      const result = await (client as unknown as (strings: TemplateStringsArray) => Promise<QueryResult>)(templateStrings);
+      return result as T[];
+    }
+    // Se há parâmetros, substituir $1, $2, etc pelo formato de tagged template
+    // Dividir a query nos placeholders
+    const parts = queryString.split(/\$\d+/);
+    const strings = Object.assign(parts, { raw: parts }) as TemplateStringsArray;
+    const result = await (client as unknown as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<QueryResult>)(strings, ...params);
     return result as T[];
   } catch (error) {
     console.error('Erro na query:', error);
@@ -30,7 +54,7 @@ export async function query<T>(queryString: string, params: unknown[] = []): Pro
 }
 
 // Função para executar query e retornar um único resultado
-export async function queryOne<T>(queryString: string, params: unknown[] = []): Promise<T | null> {
+export async function queryOne<T = Record<string, unknown>>(queryString: string, params: unknown[] = []): Promise<T | null> {
   const results = await query<T>(queryString, params);
   return results[0] || null;
 }

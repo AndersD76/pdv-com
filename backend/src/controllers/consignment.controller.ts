@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { sql } from '../database.js';
+import { sql, query } from '../database.js';
 import { z } from 'zod';
 
 const listSchema = z.object({
@@ -82,7 +82,7 @@ export async function getAll(req: Request, res: Response) {
 
     queryStr += ' ORDER BY cl.created_at DESC';
 
-    const lists = await sql(queryStr, params);
+    const lists = await query(queryStr, params);
     res.json(lists);
   } catch (error) {
     console.error('Erro ao listar consignações:', error);
@@ -401,7 +401,7 @@ export async function returnAllProducts(req: Request, res: Response) {
       SET status = 'DEVOLVIDO', updated_at = CURRENT_TIMESTAMP
       WHERE lista_id = ${id} AND status = 'DISPONIVEL'
       RETURNING *
-    `;
+    ` as Record<string, unknown>[];
 
     res.json({ message: `${result.length} produtos devolvidos` });
   } catch (error) {
@@ -488,12 +488,12 @@ export async function getPaymentReport(req: Request, res: Response) {
 
     queryStr += ' ORDER BY cl.data_recebimento DESC';
 
-    const lists = await sql(queryStr, params) as Array<{
+    const lists = await query<{
       valor_a_pagar: string | number;
       valor_pago: string | number;
       pago: boolean;
       [key: string]: unknown;
-    }>;
+    }>(queryStr, params);
 
     // Totais
     const totalAPagar = lists.reduce((sum, l) => sum + (Number(l.valor_a_pagar) || 0), 0);

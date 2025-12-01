@@ -219,9 +219,9 @@ export async function getCommissionReport(req: Request, res: Response) {
     `;
 
     res.json({
-      seller: parseNumericFields(seller),
-      commissions: commissions.map((c: Record<string, unknown>) => parseNumericFields(c)),
-      totals: parseNumericFields(totals)
+      seller: parseNumericFields(seller as Record<string, unknown>),
+      commissions: (commissions as Record<string, unknown>[]).map((c) => parseNumericFields(c)),
+      totals: parseNumericFields(totals as Record<string, unknown>)
     });
   } catch (error) {
     console.error('Erro ao gerar relatório de comissões:', error);

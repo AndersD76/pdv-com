@@ -136,16 +136,16 @@ export async function getDashboard(req: Request, res: Response) {
     `;
 
     res.json({
-      productStats: parseNumericFields(productStats),
-      salesToday: parseNumericFields(salesToday),
-      salesMonth: parseNumericFields(salesMonth),
-      expiringLists: expiringLists.map((l: Record<string, unknown>) => parseNumericFields(l)),
-      expiredLists: expiredLists.map((l: Record<string, unknown>) => parseNumericFields(l)),
-      recentSales: recentSales.map((s: Record<string, unknown>) => parseNumericFields(s)),
-      topSuppliers: topSuppliers.map((s: Record<string, unknown>) => parseNumericFields(s)),
-      salesByPayment: salesByPayment.map((s: Record<string, unknown>) => parseNumericFields(s)),
-      topSellers: topSellers.map((s: Record<string, unknown>) => parseNumericFields(s)),
-      pendingCommissions: parseNumericFields(pendingCommissions)
+      productStats: parseNumericFields(productStats as Record<string, unknown>),
+      salesToday: parseNumericFields(salesToday as Record<string, unknown>),
+      salesMonth: parseNumericFields(salesMonth as Record<string, unknown>),
+      expiringLists: (expiringLists as Record<string, unknown>[]).map((l) => parseNumericFields(l)),
+      expiredLists: (expiredLists as Record<string, unknown>[]).map((l) => parseNumericFields(l)),
+      recentSales: (recentSales as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
+      topSuppliers: (topSuppliers as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
+      salesByPayment: (salesByPayment as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
+      topSellers: (topSellers as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
+      pendingCommissions: parseNumericFields(pendingCommissions as Record<string, unknown>)
     });
   } catch (error) {
     console.error('Erro ao carregar dashboard:', error);

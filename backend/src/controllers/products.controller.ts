@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { sql } from '../database.js';
+import { sql, query } from '../database.js';
 
 // Buscar produto por código de barras (usado no PDV)
 export async function getByBarcode(req: Request, res: Response) {
@@ -96,7 +96,7 @@ export async function getAll(req: Request, res: Response) {
 
     queryStr += ' ORDER BY p.created_at DESC LIMIT 500';
 
-    const products = await sql(queryStr, params);
+    const products = await query(queryStr, params);
     res.json(products);
   } catch (error) {
     console.error('Erro ao listar produtos:', error);

@@ -37,7 +37,8 @@ export async function getAll(req: Request, res: Response) {
 export async function getById(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const [supplier] = await sql`SELECT * FROM suppliers WHERE id = ${id}`;
+    const result = await sql`SELECT * FROM suppliers WHERE id = ${id}` as Record<string, unknown>[];
+    const [supplier] = result;
 
     if (!supplier) {
       return res.status(404).json({ error: 'Fornecedor não encontrado' });
