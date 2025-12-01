@@ -9,11 +9,14 @@ neonConfig.fetchConnectionCache = true;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
-  throw new Error('DATABASE_URL não configurada no arquivo .env');
+  console.error('ERRO: DATABASE_URL não configurada!');
+  console.error('Variáveis de ambiente disponíveis:', Object.keys(process.env).filter(k => !k.includes('SECRET') && !k.includes('PASSWORD')));
 }
 
-// Cliente SQL do Neon
-export const sql = neon(DATABASE_URL);
+// Cliente SQL do Neon (criado apenas se DATABASE_URL existir)
+export const sql = DATABASE_URL ? neon(DATABASE_URL) : (() => {
+  throw new Error('DATABASE_URL não configurada');
+}) as ReturnType<typeof neon>;
 
 // Função para executar queries
 export async function query<T>(queryString: string, params: unknown[] = []): Promise<T[]> {
