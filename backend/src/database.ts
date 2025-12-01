@@ -6,43 +6,50 @@ dotenv.config();
 // Configuração para melhor performance
 neonConfig.fetchConnectionCache = true;
 
-const DATABASE_URL = process.env.DATABASE_URL;
+// Cliente SQL do Neon - inicialização lazy
+let neonClient: NeonQueryFunction<false, false> | null = null;
 
-if (!DATABASE_URL) {
-  console.error('ERRO: DATABASE_URL não configurada!');
-  console.error('Variáveis de ambiente disponíveis:', Object.keys(process.env).filter(k => !k.includes('SECRET') && !k.includes('PASSWORD')));
-}
-
-// Cliente SQL do Neon
-const neonClient: NeonQueryFunction<false, false> | null = DATABASE_URL ? neon(DATABASE_URL) : null;
-
-// Wrapper para garantir que o cliente existe
-function getSql(): NeonQueryFunction<false, false> {
+function getClient(): NeonQueryFunction<false, false> {
   if (!neonClient) {
-    throw new Error('DATABASE_URL não configurada');
+    const DATABASE_URL = process.env.DATABASE_URL;
+    if (!DATABASE_URL) {
+      console.error('ERRO: DATABASE_URL não configurada!');
+      console.error('Variáveis de ambiente disponíveis:', Object.keys(process.env).filter(k => !k.includes('SECRET') && !k.includes('PASSWORD') && !k.includes('URL')));
+      throw new Error('DATABASE_URL não configurada');
+    }
+    console.log('Inicializando conexão com o banco de dados...');
+    neonClient = neon(DATABASE_URL);
   }
   return neonClient;
 }
 
-// Exportar sql como tagged template function
-export const sql = getSql();
+// Criar um proxy para o sql que inicializa sob demanda
+type SqlFunction = NeonQueryFunction<false, false>;
+
+const sqlHandler: ProxyHandler<SqlFunction> = {
+  apply(_target, thisArg, args) {
+    const client = getClient();
+    return Reflect.apply(client, thisArg, args);
+  }
+};
+
+// Exportar sql como função que pode ser usada como tagged template
+export const sql = new Proxy((() => {}) as unknown as SqlFunction, sqlHandler);
 
 // Tipo para os resultados das queries
 type QueryResult = Record<string, unknown>[];
 
 // Função para executar queries com parâmetros dinâmicos
 export async function query<T = Record<string, unknown>>(queryString: string, params: unknown[] = []): Promise<T[]> {
-  const client = getSql();
+  const client = getClient();
   try {
-    // Criar template literal fake para o cliente Neon
-    const templateStrings = [queryString] as unknown as TemplateStringsArray;
     // Se não há parâmetros, executar diretamente
     if (params.length === 0) {
+      const templateStrings = Object.assign([queryString], { raw: [queryString] }) as TemplateStringsArray;
       const result = await (client as unknown as (strings: TemplateStringsArray) => Promise<QueryResult>)(templateStrings);
       return result as T[];
     }
-    // Se há parâmetros, substituir $1, $2, etc pelo formato de tagged template
-    // Dividir a query nos placeholders
+    // Se há parâmetros, dividir a query nos placeholders
     const parts = queryString.split(/\$\d+/);
     const strings = Object.assign(parts, { raw: parts }) as TemplateStringsArray;
     const result = await (client as unknown as (strings: TemplateStringsArray, ...values: unknown[]) => Promise<QueryResult>)(strings, ...params);
@@ -61,10 +68,11 @@ export async function queryOne<T = Record<string, unknown>>(queryString: string,
 
 // Inicialização do banco de dados - Criação das tabelas
 export async function initializeDatabase(): Promise<void> {
+  const client = getClient();
   console.log('Inicializando banco de dados...');
 
   // Tabela de Fornecedores
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS suppliers (
       id SERIAL PRIMARY KEY,
       nome VARCHAR(255) NOT NULL,
@@ -78,7 +86,7 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Tabela de Vendedoras
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS sellers (
       id SERIAL PRIMARY KEY,
       nome VARCHAR(255) NOT NULL,
@@ -93,7 +101,7 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Tabela de Listas de Consignação
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS consignment_lists (
       id SERIAL PRIMARY KEY,
       codigo VARCHAR(20) UNIQUE NOT NULL,
@@ -112,15 +120,15 @@ export async function initializeDatabase(): Promise<void> {
 
   // Adicionar colunas de pagamento se não existirem (para bancos já criados)
   try {
-    await sql`ALTER TABLE consignment_lists ADD COLUMN IF NOT EXISTS pago BOOLEAN DEFAULT FALSE`;
-    await sql`ALTER TABLE consignment_lists ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMP`;
-    await sql`ALTER TABLE consignment_lists ADD COLUMN IF NOT EXISTS valor_pago DECIMAL(10,2)`;
+    await client`ALTER TABLE consignment_lists ADD COLUMN IF NOT EXISTS pago BOOLEAN DEFAULT FALSE`;
+    await client`ALTER TABLE consignment_lists ADD COLUMN IF NOT EXISTS data_pagamento TIMESTAMP`;
+    await client`ALTER TABLE consignment_lists ADD COLUMN IF NOT EXISTS valor_pago DECIMAL(10,2)`;
   } catch (e) {
     // Colunas já existem
   }
 
   // Tabela de Produtos
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS products (
       id SERIAL PRIMARY KEY,
       codigo_barras VARCHAR(50) UNIQUE NOT NULL,
@@ -140,7 +148,7 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Tabela de Vendas
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS sales (
       id SERIAL PRIMARY KEY,
       codigo VARCHAR(20) UNIQUE NOT NULL,
@@ -156,7 +164,7 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Tabela de Itens da Venda
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS sale_items (
       id SERIAL PRIMARY KEY,
       venda_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
@@ -166,7 +174,7 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Tabela de Comissões das Vendedoras
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS seller_commissions (
       id SERIAL PRIMARY KEY,
       vendedora_id INTEGER NOT NULL REFERENCES sellers(id),
@@ -181,21 +189,21 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Tabelas de Cadastros Auxiliares
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS descriptions (
       id SERIAL PRIMARY KEY,
       nome VARCHAR(100) NOT NULL UNIQUE
     )
   `;
 
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS colors (
       id SERIAL PRIMARY KEY,
       nome VARCHAR(100) NOT NULL UNIQUE
     )
   `;
 
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS sizes (
       id SERIAL PRIMARY KEY,
       nome VARCHAR(20) NOT NULL,
@@ -204,7 +212,7 @@ export async function initializeDatabase(): Promise<void> {
     )
   `;
 
-  await sql`
+  await client`
     CREATE TABLE IF NOT EXISTS brands (
       id SERIAL PRIMARY KEY,
       nome VARCHAR(100) NOT NULL UNIQUE
@@ -212,15 +220,15 @@ export async function initializeDatabase(): Promise<void> {
   `;
 
   // Criar índices para melhor performance
-  await sql`CREATE INDEX IF NOT EXISTS idx_products_lista_id ON products(lista_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_products_codigo_barras ON products(codigo_barras)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_consignment_lists_fornecedor_id ON consignment_lists(fornecedor_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_consignment_lists_status ON consignment_lists(status)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_sales_data_venda ON sales(data_venda)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_sales_vendedora_id ON sales(vendedora_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_sale_items_venda_id ON sale_items(venda_id)`;
-  await sql`CREATE INDEX IF NOT EXISTS idx_seller_commissions_vendedora_id ON seller_commissions(vendedora_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_products_lista_id ON products(lista_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_products_codigo_barras ON products(codigo_barras)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_consignment_lists_fornecedor_id ON consignment_lists(fornecedor_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_consignment_lists_status ON consignment_lists(status)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_sales_data_venda ON sales(data_venda)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_sales_vendedora_id ON sales(vendedora_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_sale_items_venda_id ON sale_items(venda_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_seller_commissions_vendedora_id ON seller_commissions(vendedora_id)`;
 
   console.log('Banco de dados inicializado com sucesso!');
 }
@@ -228,7 +236,8 @@ export async function initializeDatabase(): Promise<void> {
 // Função para verificar conexão
 export async function testConnection(): Promise<boolean> {
   try {
-    await sql`SELECT 1`;
+    const client = getClient();
+    await client`SELECT 1`;
     console.log('Conexão com o banco de dados estabelecida!');
     return true;
   } catch (error) {
