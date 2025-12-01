@@ -1,0 +1,16 @@
+{
+  "name": "pdv-com",
+  "version": "1.0.0",
+  "description": "PDV COM - Sistema de Controle para Brechó",
+  "scripts": {
+    "install:all": "cd frontend && npm install && cd ../backend && npm install",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build": "npm run build:frontend && npm run build:backend",
+    "start": "cd backend && npm start",
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

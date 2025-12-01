@@ -1,10 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import { initializeDatabase, testConnection } from './database.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,6 +31,18 @@ app.use('/api', routes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Servir frontend em produção
+if (process.env.NODE_ENV === 'production') {
+  const frontendPath = path.join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendPath));
+
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(frontendPath, 'index.html'));
+    }
+  });
+}
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
