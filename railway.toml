@@ -1,10 +1,8 @@
 [build]
 builder = "NIXPACKS"
-
-[build.nixpacksConfigPath]
-configPath = "nixpacks.toml"
+nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
-startCommand = "npm start"
+startCommand = "NODE_ENV=production node backend/dist/server.js"
 healthcheckPath = "/health"
 restartPolicyType = "ON_FAILURE"
