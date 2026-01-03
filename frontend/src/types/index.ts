@@ -219,3 +219,111 @@ export interface CartItem {
   product: Product;
   valor_unitario: number;
 }
+
+// ==================== DEPARTAMENTO PESSOAL ====================
+
+export interface Employee {
+  id: number;
+  nome: string;
+  cpf: string | null;
+  cargo: string;
+  departamento: string | null;
+  salario_base: number;
+  data_admissao: string;
+  dependentes: number;
+  status: 'ativo' | 'inativo';
+  email: string | null;
+  telefone: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimeClockRecord {
+  id: number;
+  funcionario_id: number | null;
+  funcionario_nome: string;
+  data: string;
+  hora: string;
+  tipo: 'entrada' | 'saida';
+  observacao: string | null;
+  created_at: string;
+}
+
+export interface WorkSchedule {
+  id: number;
+  seg_sex_entrada: string;
+  seg_sex_saida: string;
+  intervalo_inicio: string | null;
+  intervalo_fim: string | null;
+  sabado_entrada: string | null;
+  sabado_saida: string | null;
+  carga_horaria_diaria: number;
+  tolerancia_minutos: number;
+}
+
+export interface Customer {
+  id: number;
+  nome: string;
+  cpf: string | null;
+  telefone: string | null;
+  email: string | null;
+  endereco: string | null;
+  cidade: string | null;
+  estado: string | null;
+  cep: string | null;
+  data_nascimento: string | null;
+  observacoes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeStats {
+  total: number;
+  ativos: number;
+  inativos: number;
+  folha_total: number;
+}
+
+export interface PayrollResult {
+  salario_bruto: number;
+  horas_extras: { quantidade: number; percentual: number; valor: number };
+  adicional_noturno: { horas: number; valor: number };
+  outros_proventos: number;
+  total_proventos: number;
+  inss: { valor: number; aliquota_efetiva: number };
+  irrf: { valor: number; aliquota: number; faixa: string; base_calculo: number };
+  vale_transporte: { percentual: number; valor: number };
+  vale_refeicao: number;
+  outros_descontos: number;
+  total_descontos: number;
+  salario_liquido: number;
+  encargos: { fgts: number; inss_patronal: number; total: number };
+}
+
+export interface TaxSimulationResult {
+  faturamento_mensal: number;
+  faturamento_anual: number;
+  tipo_atividade: string;
+  mei: { elegivel: boolean; imposto_mensal?: number; limite_mensal?: number };
+  simples: { elegivel: boolean; aliquota_efetiva?: number; imposto_mensal?: number };
+  lucro_presumido: { imposto_mensal: number; detalhamento: Record<string, number> };
+  recomendacao: string;
+}
+
+export interface TerminationResult {
+  dados_contrato: {
+    salario_bruto: number;
+    data_admissao: string;
+    data_demissao: string;
+    tempo_servico: { anos: number; meses: number; dias: number };
+  };
+  tipo_rescisao: string;
+  verbas_rescisorias: Record<string, number>;
+  resumo: {
+    total_proventos: number;
+    total_descontos: number;
+    total_rescisao: number;
+    fgts: { saldo: number; multa: number; saque_total: number };
+    direito_seguro_desemprego: boolean;
+  };
+}

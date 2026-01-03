@@ -14,6 +14,14 @@ import Vendedoras from './pages/cadastros/Vendedoras';
 import Relatorios from './pages/relatorios/Relatorios';
 import Cadastros from './pages/cadastros/Cadastros';
 
+// Departamento Pessoal Pages
+import Funcionarios from './pages/dp/Funcionarios';
+import Ponto from './pages/dp/Ponto';
+import Folha from './pages/dp/Folha';
+import SimuladorImpostos from './pages/dp/SimuladorImpostos';
+import SimuladorRescisao from './pages/dp/SimuladorRescisao';
+import Clientes from './pages/dp/Clientes';
+
 function App() {
   return (
     <BrowserRouter>
@@ -106,6 +114,56 @@ function App() {
           element={
             <Layout>
               <Cadastros />
+            </Layout>
+          }
+        />
+
+        {/* Departamento Pessoal */}
+        <Route
+          path="/funcionarios"
+          element={
+            <Layout>
+              <Funcionarios />
+            </Layout>
+          }
+        />
+        <Route
+          path="/ponto"
+          element={
+            <Layout>
+              <Ponto />
+            </Layout>
+          }
+        />
+        <Route
+          path="/folha"
+          element={
+            <Layout>
+              <Folha />
+            </Layout>
+          }
+        />
+        <Route
+          path="/simulador-impostos"
+          element={
+            <Layout>
+              <SimuladorImpostos />
+            </Layout>
+          }
+        />
+        <Route
+          path="/simulador-rescisao"
+          element={
+            <Layout>
+              <SimuladorRescisao />
+            </Layout>
+          }
+        />
+        <Route
+          path="/clientes"
+          element={
+            <Layout>
+              <Clientes />
             </Layout>
           }
         />

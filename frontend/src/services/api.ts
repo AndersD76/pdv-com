@@ -9,7 +9,15 @@ import type {
   DashboardData,
   SellerCommission,
   PaymentMethod,
-  ProductCondition
+  ProductCondition,
+  Employee,
+  EmployeeStats,
+  TimeClockRecord,
+  WorkSchedule,
+  Customer,
+  PayrollResult,
+  TaxSimulationResult,
+  TerminationResult
 } from '../types';
 
 const api = axios.create({
@@ -186,6 +194,113 @@ export const auxiliariesApi = {
     api.post('/brands', { nome }).then(res => res.data),
   deleteBrand: (id: number) =>
     api.delete(`/brands/${id}`).then(res => res.data),
+};
+
+// ==================== DEPARTAMENTO PESSOAL ====================
+
+// Funcionários
+export const employeesApi = {
+  getAll: (params?: { search?: string; status?: string }) =>
+    api.get<Employee[]>('/employees', { params }).then(res => res.data),
+  getById: (id: number) =>
+    api.get<Employee>(`/employees/${id}`).then(res => res.data),
+  getStats: () =>
+    api.get<EmployeeStats>('/employees/stats').then(res => res.data),
+  create: (data: Partial<Employee>) =>
+    api.post<Employee>('/employees', data).then(res => res.data),
+  update: (id: number, data: Partial<Employee>) =>
+    api.put<Employee>(`/employees/${id}`, data).then(res => res.data),
+  toggleStatus: (id: number) =>
+    api.patch<Employee>(`/employees/${id}/toggle-status`).then(res => res.data),
+  delete: (id: number) =>
+    api.delete(`/employees/${id}`).then(res => res.data),
+};
+
+// Controle de Ponto
+export const timeclockApi = {
+  getAll: (params?: { data_inicio?: string; data_fim?: string; funcionario_id?: number; tipo?: string }) =>
+    api.get<TimeClockRecord[]>('/timeclock', { params }).then(res => res.data),
+  getById: (id: number) =>
+    api.get<TimeClockRecord>(`/timeclock/${id}`).then(res => res.data),
+  getResumo: (params: { funcionario_id: number; mes: number; ano: number }) =>
+    api.get('/timeclock/resumo', { params }).then(res => res.data),
+  registrar: (data: { funcionario_id?: number; funcionario_nome: string; tipo: 'entrada' | 'saida'; observacao?: string }) =>
+    api.post<TimeClockRecord>('/timeclock', data).then(res => res.data),
+  update: (id: number, data: { data: string; hora: string; tipo: string; observacao?: string }) =>
+    api.put<TimeClockRecord>(`/timeclock/${id}`, data).then(res => res.data),
+  delete: (id: number) =>
+    api.delete(`/timeclock/${id}`).then(res => res.data),
+};
+
+// Configuração de Jornada
+export const jornadaApi = {
+  get: () =>
+    api.get<WorkSchedule>('/jornada').then(res => res.data),
+  save: (data: Partial<WorkSchedule>) =>
+    api.post<WorkSchedule>('/jornada', data).then(res => res.data),
+};
+
+// Folha de Pagamento
+export const payrollApi = {
+  calcular: (data: {
+    salario_bruto: number;
+    dependentes?: number;
+    horas_extras?: number;
+    percentual_hora_extra?: number;
+    adicional_noturno?: number;
+    vale_transporte_perc?: number;
+    vale_refeicao?: number;
+    outros_descontos?: number;
+    outros_proventos?: number;
+  }) =>
+    api.post<PayrollResult>('/folha/calcular', data).then(res => res.data),
+  calcularDecimoTerceiro: (data: {
+    salario_bruto: number;
+    meses_trabalhados: number;
+    parcela: 'primeira' | 'segunda';
+    dependentes?: number;
+  }) =>
+    api.post('/folha/13-salario', data).then(res => res.data),
+  calcularFerias: (data: {
+    salario_bruto: number;
+    dias_ferias?: number;
+    abono_pecuniario?: boolean;
+    dependentes?: number;
+  }) =>
+    api.post('/folha/ferias', data).then(res => res.data),
+};
+
+// Simuladores
+export const simulatorsApi = {
+  simularImpostos: (data: { faturamento_mensal: number; tipo_atividade?: 'comercio' | 'servicos' | 'industria' }) =>
+    api.post<TaxSimulationResult>('/simulador/impostos', data).then(res => res.data),
+  simularRescisao: (data: {
+    salario_bruto: number;
+    data_admissao: string;
+    data_demissao: string;
+    tipo_rescisao: 'sem_justa_causa' | 'com_justa_causa' | 'pedido_demissao' | 'acordo';
+    saldo_fgts?: number;
+    aviso_previo_trabalhado?: boolean;
+    ferias_vencidas?: boolean;
+    meses_ferias_proporcionais?: number;
+  }) =>
+    api.post<TerminationResult>('/simulador/rescisao', data).then(res => res.data),
+};
+
+// Clientes
+export const customersApi = {
+  getAll: (search?: string) =>
+    api.get<Customer[]>('/customers', { params: { search } }).then(res => res.data),
+  getById: (id: number) =>
+    api.get<Customer>(`/customers/${id}`).then(res => res.data),
+  getStats: () =>
+    api.get('/customers/stats').then(res => res.data),
+  create: (data: Partial<Customer>) =>
+    api.post<Customer>('/customers', data).then(res => res.data),
+  update: (id: number, data: Partial<Customer>) =>
+    api.put<Customer>(`/customers/${id}`, data).then(res => res.data),
+  delete: (id: number) =>
+    api.delete(`/customers/${id}`).then(res => res.data),
 };
 
 export default api;

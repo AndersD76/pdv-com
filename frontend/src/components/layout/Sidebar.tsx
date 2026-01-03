@@ -9,19 +9,34 @@ import {
   Tags,
   FileText,
   Settings,
-  Store
+  Store,
+  Briefcase,
+  Clock,
+  DollarSign,
+  Calculator,
+  UserMinus,
+  Contact
 } from 'lucide-react';
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: ShoppingCart, label: 'PDV', path: '/pdv' },
-  { icon: ClipboardList, label: 'Consignações', path: '/consignacoes' },
+  { icon: ClipboardList, label: 'Consignacoes', path: '/consignacoes' },
   { icon: Package, label: 'Produtos', path: '/produtos' },
   { icon: Tags, label: 'Etiquetas', path: '/etiquetas' },
   { icon: Users, label: 'Fornecedores', path: '/fornecedores' },
   { icon: UserCheck, label: 'Vendedoras', path: '/vendedoras' },
-  { icon: FileText, label: 'Relatórios', path: '/relatorios' },
+  { icon: FileText, label: 'Relatorios', path: '/relatorios' },
   { icon: Settings, label: 'Cadastros', path: '/cadastros' },
+];
+
+const dpMenuItems = [
+  { icon: Briefcase, label: 'Funcionarios', path: '/funcionarios' },
+  { icon: Clock, label: 'Ponto', path: '/ponto' },
+  { icon: DollarSign, label: 'Folha', path: '/folha' },
+  { icon: Calculator, label: 'Simulador Impostos', path: '/simulador-impostos' },
+  { icon: UserMinus, label: 'Simulador Rescisao', path: '/simulador-rescisao' },
+  { icon: Contact, label: 'Clientes', path: '/clientes' },
 ];
 
 export function Sidebar() {
@@ -56,6 +71,29 @@ export function Sidebar() {
             <span>{item.label}</span>
           </NavLink>
         ))}
+
+        {/* Divisor DP */}
+        <div className="pt-4 mt-4 border-t border-gray-200">
+          <p className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            Departamento Pessoal
+          </p>
+          {dpMenuItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  isActive
+                    ? 'bg-primary-100 text-primary-700 font-medium'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`
+              }
+            >
+              <item.icon className="w-5 h-5" />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
       </nav>
 
       {/* Footer */}

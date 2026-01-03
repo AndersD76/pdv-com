@@ -219,6 +219,85 @@ export async function initializeDatabase(): Promise<void> {
     )
   `;
 
+  // ==================== DEPARTAMENTO PESSOAL ====================
+
+  // Tabela de Funcionários
+  await client`
+    CREATE TABLE IF NOT EXISTS employees (
+      id SERIAL PRIMARY KEY,
+      nome VARCHAR(255) NOT NULL,
+      cpf VARCHAR(14) UNIQUE,
+      cargo VARCHAR(100) NOT NULL,
+      departamento VARCHAR(100),
+      salario_base DECIMAL(10,2) NOT NULL,
+      data_admissao DATE NOT NULL,
+      dependentes INTEGER DEFAULT 0,
+      status VARCHAR(20) DEFAULT 'ativo' CHECK (status IN ('ativo', 'inativo')),
+      email VARCHAR(255),
+      telefone VARCHAR(20),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+
+  // Tabela de Registro de Ponto
+  await client`
+    CREATE TABLE IF NOT EXISTS time_clock (
+      id SERIAL PRIMARY KEY,
+      funcionario_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+      funcionario_nome VARCHAR(255) NOT NULL,
+      data DATE NOT NULL,
+      hora TIME NOT NULL,
+      tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('entrada', 'saida')),
+      observacao TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+
+  // Tabela de Configuração de Jornada
+  await client`
+    CREATE TABLE IF NOT EXISTS work_schedule (
+      id SERIAL PRIMARY KEY,
+      seg_sex_entrada TIME DEFAULT '08:00:00',
+      seg_sex_saida TIME DEFAULT '18:00:00',
+      intervalo_inicio TIME DEFAULT '12:00:00',
+      intervalo_fim TIME DEFAULT '13:00:00',
+      sabado_entrada TIME,
+      sabado_saida TIME,
+      carga_horaria_diaria INTEGER DEFAULT 8,
+      tolerancia_minutos INTEGER DEFAULT 10,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+
+  // Tabela de Clientes
+  await client`
+    CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      nome VARCHAR(255) NOT NULL,
+      cpf VARCHAR(14) UNIQUE,
+      telefone VARCHAR(20),
+      email VARCHAR(255),
+      endereco TEXT,
+      cidade VARCHAR(100),
+      estado VARCHAR(2),
+      cep VARCHAR(9),
+      data_nascimento DATE,
+      observacoes TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+
+  // Índices para as novas tabelas
+  await client`CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_employees_cpf ON employees(cpf)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_time_clock_funcionario_id ON time_clock(funcionario_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_time_clock_data ON time_clock(data)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_customers_cpf ON customers(cpf)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_customers_nome ON customers(nome)`;
+
   // Criar índices para melhor performance
   await client`CREATE INDEX IF NOT EXISTS idx_products_lista_id ON products(lista_id)`;
   await client`CREATE INDEX IF NOT EXISTS idx_products_status ON products(status)`;

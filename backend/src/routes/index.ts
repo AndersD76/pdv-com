@@ -9,6 +9,13 @@ import * as productsController from '../controllers/products.controller.js';
 import * as auxiliariesController from '../controllers/auxiliaries.controller.js';
 import * as dashboardController from '../controllers/dashboard.controller.js';
 
+// Departamento Pessoal controllers
+import * as employeesController from '../controllers/employees.controller.js';
+import * as timeclockController from '../controllers/timeclock.controller.js';
+import * as payrollController from '../controllers/payroll.controller.js';
+import * as simulatorsController from '../controllers/simulators.controller.js';
+import * as customersController from '../controllers/customers.controller.js';
+
 const router = Router();
 
 // ==================== DASHBOARD ====================
@@ -89,5 +96,45 @@ router.delete('/sizes/:id', auxiliariesController.deleteSize);
 router.get('/brands', auxiliariesController.getBrands);
 router.post('/brands', auxiliariesController.createBrand);
 router.delete('/brands/:id', auxiliariesController.deleteBrand);
+
+// ==================== DEPARTAMENTO PESSOAL ====================
+
+// Funcionários
+router.get('/employees', employeesController.getAll);
+router.get('/employees/stats', employeesController.getStats);
+router.get('/employees/:id', employeesController.getById);
+router.post('/employees', employeesController.create);
+router.put('/employees/:id', employeesController.update);
+router.patch('/employees/:id/toggle-status', employeesController.toggleStatus);
+router.delete('/employees/:id', employeesController.remove);
+
+// Controle de Ponto
+router.get('/timeclock', timeclockController.getAll);
+router.get('/timeclock/resumo', timeclockController.getResumo);
+router.get('/timeclock/:id', timeclockController.getById);
+router.post('/timeclock', timeclockController.registrar);
+router.put('/timeclock/:id', timeclockController.update);
+router.delete('/timeclock/:id', timeclockController.remove);
+
+// Configuração de Jornada
+router.get('/jornada', timeclockController.getJornada);
+router.post('/jornada', timeclockController.saveJornada);
+
+// Folha de Pagamento
+router.post('/folha/calcular', payrollController.calcularFolha);
+router.post('/folha/13-salario', payrollController.calcularDecimoTerceiro);
+router.post('/folha/ferias', payrollController.calcularFerias);
+
+// Simuladores
+router.post('/simulador/impostos', simulatorsController.simularImpostos);
+router.post('/simulador/rescisao', simulatorsController.simularRescisao);
+
+// Clientes
+router.get('/customers', customersController.getAll);
+router.get('/customers/stats', customersController.getStats);
+router.get('/customers/:id', customersController.getById);
+router.post('/customers', customersController.create);
+router.put('/customers/:id', customersController.update);
+router.delete('/customers/:id', customersController.remove);
 
 export default router;
