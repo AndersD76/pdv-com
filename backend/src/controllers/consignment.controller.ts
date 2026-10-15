@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { sql, query, withTransaction } from '../database.js';
+import { sql, query, withTransaction, Tx } from '../database.js';
 import { z } from 'zod';
 import { HttpError, sendError, parseDateParam, dateString, round2 } from '../utils/http.js';
 
@@ -35,11 +35,28 @@ const productSchema = z.object({
 // O número da peça tem 4 dígitos no código de barras
 const MAX_ITEMS_PER_LIST = 9999;
 
+// Listas criadas pelo sistema (L0001, L0002...): código de barras = número da lista + número da peça
+const STANDARD_LIST_CODE = /^L\d+$/;
+
 // Gerar código de barras para produto
 function generateBarcode(listCode: string, itemNumber: number): string {
   const listNum = listCode.replace('L', '');
   const itemNum = itemNumber.toString().padStart(4, '0');
   return `${listNum}${itemNum}`;
+}
+
+// Listas importadas (código fora do padrão, ex.: LOJA001) ou com mais de 9999 peças:
+// sequência geral de 13 dígitos começando por 2 (faixa de uso interno de loja), que não
+// coincide com os códigos de 8 dígitos do sistema nem com os de 12 dígitos importados
+async function nextGlobalBarcode(tx: Tx): Promise<string> {
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    const row = await tx.queryOne<{ codigo: string; existe: boolean }>(
+      `SELECT c.codigo, EXISTS (SELECT 1 FROM products WHERE codigo_barras = c.codigo) AS existe
+       FROM (SELECT '2' || LPAD(nextval('products_codigo_barras_seq')::text, 12, '0') AS codigo) c`
+    );
+    if (row && !row.existe) return row.codigo;
+  }
+  throw new HttpError(500, 'Não foi possível gerar um código de barras único');
 }
 
 // Listar todas as listas
@@ -244,23 +261,28 @@ export async function addProduct(req: Request, res: Response) {
     const data = productSchema.parse(req.body);
 
     const product = await withTransaction(async (tx) => {
-      // Contador por lista: o número da peça nunca se repete, mesmo após remover peças
-      const list = await tx.queryOne<{ codigo: string; ultimo_item: number }>(
-        `UPDATE consignment_lists SET ultimo_item = ultimo_item + 1
-         WHERE id = $1 AND status <> 'FINALIZADA'
-         RETURNING codigo, ultimo_item`,
+      const list = await tx.queryOne<{ codigo: string; status: string; ultimo_item: number }>(
+        'SELECT codigo, status, ultimo_item FROM consignment_lists WHERE id = $1 FOR UPDATE',
         [id]
       );
 
       if (!list) {
-        const exists = await tx.queryOne('SELECT 1 FROM consignment_lists WHERE id = $1', [id]);
-        throw exists
-          ? new HttpError(400, 'Não é possível adicionar produtos a uma lista finalizada')
-          : new HttpError(404, 'Lista não encontrada');
+        throw new HttpError(404, 'Lista não encontrada');
+      }
+      if (list.status === 'FINALIZADA') {
+        throw new HttpError(400, 'Não é possível adicionar produtos a uma lista finalizada');
       }
 
-      if (list.ultimo_item > MAX_ITEMS_PER_LIST) {
-        throw new HttpError(400, `Limite de ${MAX_ITEMS_PER_LIST} peças por lista atingido. Crie uma nova lista.`);
+      let barcode: string;
+      if (STANDARD_LIST_CODE.test(list.codigo) && list.ultimo_item < MAX_ITEMS_PER_LIST) {
+        // Contador por lista: o número da peça nunca se repete, mesmo após remover peças
+        const updated = await tx.queryOne<{ ultimo_item: number }>(
+          'UPDATE consignment_lists SET ultimo_item = ultimo_item + 1 WHERE id = $1 RETURNING ultimo_item',
+          [id]
+        );
+        barcode = generateBarcode(list.codigo, updated!.ultimo_item);
+      } else {
+        barcode = await nextGlobalBarcode(tx);
       }
 
       return tx.queryOne(
@@ -269,7 +291,7 @@ export async function addProduct(req: Request, res: Response) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [
-          generateBarcode(list.codigo, list.ultimo_item), data.descricao, data.cor || null, data.marca || null,
+          barcode, data.descricao, data.cor || null, data.marca || null,
           data.tamanho || null, data.condicao, data.defeitos || null, data.valor_compra, data.valor_venda, id,
           data.canal, data.titulo_loja || null, data.descricao_loja || null
         ]

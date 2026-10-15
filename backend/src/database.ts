@@ -424,12 +424,16 @@ export async function initializeDatabase(): Promise<void> {
     await client.transaction([
       client`ALTER TABLE consignment_lists ADD COLUMN ultimo_item INTEGER NOT NULL DEFAULT 0`,
       // Código de barras = número da lista + número da peça; recupera o maior número de peça já usado
+      // (só nas listas do sistema, L0001...; listas importadas usam outra sequência)
       client`
         UPDATE consignment_lists cl SET ultimo_item = COALESCE((
           SELECT MAX(SUBSTRING(p.codigo_barras FROM LENGTH(cl.codigo))::int)
           FROM products p
-          WHERE p.lista_id = cl.id AND SUBSTRING(p.codigo_barras FROM LENGTH(cl.codigo)) ~ '^[0-9]+$'
+          WHERE p.lista_id = cl.id
+            AND p.codigo_barras LIKE SUBSTRING(cl.codigo FROM 2) || '%'
+            AND SUBSTRING(p.codigo_barras FROM LENGTH(cl.codigo)) ~ '^[0-9]{1,9}$'
         ), 0)
+        WHERE cl.codigo ~ '^L[0-9]+$'
       `
     ]);
   }
@@ -488,6 +492,8 @@ export async function initializeDatabase(): Promise<void> {
   // Códigos de venda e de lista gerados por sequência (sem corrida e sem reaproveitar códigos)
   await syncCodeSequence('sales_codigo_seq', 'sales', 'V');
   await syncCodeSequence('consignment_lists_codigo_seq', 'consignment_lists', 'L');
+  // Códigos de barras de peças em listas importadas (ver nextGlobalBarcode no controller de consignação)
+  await client`CREATE SEQUENCE IF NOT EXISTS products_codigo_barras_seq`;
 
   // Índices para as novas tabelas
   await client`CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status)`;
