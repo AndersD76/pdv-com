@@ -3,17 +3,20 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Plus, Trash2, Edit2, Tags, FileText, RotateCcw,
-  Check, Download
+  Check, Download, Wallet, Globe, ImageOff
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { consignmentsApi, auxiliariesApi } from '../../services/api';
+import { consignmentsApi, productPhotoUrl } from '../../services/api';
 import { generateConsignmentPDF } from '../../utils/generatePDF';
 import {
-  Button, Input, Select, Modal, ModalFooter,
+  Button,
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty
 } from '../../components/ui';
+import { ProductFormModal } from '../../components/products/ProductFormModal';
 import { ProductCondition, ListStatus } from '../../types';
 import type { Product } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
+import { formatCurrency, formatDate, formatDateTime, isPastDate } from '../../utils/format';
 
 const conditionLabels: Record<ProductCondition, string> = {
   NOVA: 'Nova',
@@ -31,56 +34,14 @@ export default function ConsignacaoDetalhe() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
 
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [productForm, setProductForm] = useState({
-    descricao: '',
-    cor: '',
-    marca: '',
-    tamanho: '',
-    condicao: ProductCondition.SEMI_NOVA,
-    defeitos: '',
-    valor_compra: '',
-    valor_venda: '',
-  });
 
   const { data: list, isLoading } = useQuery({
     queryKey: ['consignment', id],
     queryFn: () => consignmentsApi.getById(Number(id)),
-  });
-
-  const { data: auxiliaries } = useQuery({
-    queryKey: ['auxiliaries'],
-    queryFn: auxiliariesApi.getAll,
-  });
-
-  const addProduct = useMutation({
-    mutationFn: (data: Parameters<typeof consignmentsApi.addProduct>[1]) =>
-      consignmentsApi.addProduct(Number(id), data),
-    onSuccess: () => {
-      toast.success('Produto adicionado!');
-      queryClient.invalidateQueries({ queryKey: ['consignment', id] });
-      setShowAddProductModal(false);
-      resetForm();
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Erro ao adicionar produto');
-    },
-  });
-
-  const updateProduct = useMutation({
-    mutationFn: ({ productId, data }: { productId: number; data: Parameters<typeof consignmentsApi.updateProduct>[2] }) =>
-      consignmentsApi.updateProduct(Number(id), productId, data),
-    onSuccess: () => {
-      toast.success('Produto atualizado!');
-      queryClient.invalidateQueries({ queryKey: ['consignment', id] });
-      setEditingProduct(null);
-      resetForm();
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Erro ao atualizar produto');
-    },
   });
 
   const removeProduct = useMutation({
@@ -111,60 +72,32 @@ export default function ConsignacaoDetalhe() {
       toast.success('Produtos devolvidos!');
       queryClient.invalidateQueries({ queryKey: ['consignment', id] });
     },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Erro ao devolver produtos');
+    },
   });
 
-  const resetForm = () => {
-    setProductForm({
-      descricao: '',
-      cor: '',
-      marca: '',
-      tamanho: '',
-      condicao: ProductCondition.SEMI_NOVA,
-      defeitos: '',
-      valor_compra: '',
-      valor_venda: '',
-    });
-  };
-
-  const handleSubmitProduct = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const data = {
-      descricao: productForm.descricao,
-      cor: productForm.cor || undefined,
-      marca: productForm.marca || undefined,
-      tamanho: productForm.tamanho || undefined,
-      condicao: productForm.condicao,
-      defeitos: productForm.defeitos || undefined,
-      valor_compra: Number(productForm.valor_compra),
-      valor_venda: Number(productForm.valor_venda),
-    };
-
-    if (editingProduct) {
-      updateProduct.mutate({ productId: editingProduct.id, data });
-    } else {
-      addProduct.mutate(data);
-    }
-  };
+  const paySupplier = useMutation({
+    mutationFn: () => consignmentsApi.markAsPaid(Number(id)),
+    onSuccess: (payment) => {
+      toast.success(`Pagamento de ${formatCurrency(payment.valor)} registrado!`);
+      queryClient.invalidateQueries({ queryKey: ['consignment', id] });
+      queryClient.invalidateQueries({ queryKey: ['paymentReport'] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || 'Erro ao registrar pagamento');
+    },
+  });
 
   const openEditModal = (product: Product) => {
     setEditingProduct(product);
-    setProductForm({
-      descricao: product.descricao,
-      cor: product.cor || '',
-      marca: product.marca || '',
-      tamanho: product.tamanho || '',
-      condicao: product.condicao,
-      defeitos: product.defeitos || '',
-      valor_compra: String(product.valor_compra),
-      valor_venda: String(product.valor_venda),
-    });
     setShowAddProductModal(true);
   };
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
-  const formatDate = (date: string) => new Date(date).toLocaleDateString('pt-BR');
+  const closeProductModal = () => {
+    setShowAddProductModal(false);
+    setEditingProduct(null);
+  };
 
   if (isLoading) {
     return <div className="animate-pulse h-96 bg-gray-200 rounded-xl" />;
@@ -177,7 +110,10 @@ export default function ConsignacaoDetalhe() {
   const products = list.products || [];
   const availableProducts = products.filter(p => p.status === 'DISPONIVEL');
   const totalValorVenda = products.reduce((sum, p) => sum + Number(p.valor_venda || 0), 0);
-  const totalVendido = products.filter(p => p.status === 'VENDIDO').reduce((sum, p) => sum + Number(p.valor_compra || 0), 0);
+  const soldProducts = products.filter(p => p.status === 'VENDIDO');
+  const totalPendente = soldProducts.filter(p => !p.pago_fornecedor).reduce((sum, p) => sum + Number(p.valor_compra || 0), 0);
+  const totalPagoFornecedor = soldProducts.filter(p => p.pago_fornecedor).reduce((sum, p) => sum + Number(p.valor_compra || 0), 0);
+  const payments = list.payments || [];
 
   return (
     <div className="space-y-6">
@@ -224,7 +160,7 @@ export default function ConsignacaoDetalhe() {
         </div>
         <div className="card p-4">
           <p className="text-sm text-gray-600">Prazo Retirada</p>
-          <p className={`font-semibold ${new Date(list.prazo_retirada) < new Date() ? 'text-red-600' : ''}`}>
+          <p className={`font-semibold ${isPastDate(list.prazo_retirada) && list.status !== 'FINALIZADA' ? 'text-red-600' : ''}`}>
             {formatDate(list.prazo_retirada)}
           </p>
         </div>
@@ -239,8 +175,11 @@ export default function ConsignacaoDetalhe() {
           <p className="text-sm text-gray-600">Valor Total</p>
           <p className="font-semibold text-green-600">{formatCurrency(totalValorVenda)}</p>
           <p className="text-xs text-gray-500">
-            A pagar: {formatCurrency(totalVendido)}
+            A pagar ao fornecedor: {formatCurrency(totalPendente)}
           </p>
+          {totalPagoFornecedor > 0 && (
+            <p className="text-xs text-green-600">Já pago: {formatCurrency(totalPagoFornecedor)}</p>
+          )}
         </div>
       </div>
 
@@ -257,6 +196,20 @@ export default function ConsignacaoDetalhe() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && totalPendente > 0 && (
+            <Button
+              variant="success"
+              isLoading={paySupplier.isPending}
+              onClick={() => {
+                if (confirm(`Registrar pagamento de ${formatCurrency(totalPendente)} ao fornecedor pelas peças vendidas?`)) {
+                  paySupplier.mutate();
+                }
+              }}
+            >
+              <Wallet className="w-4 h-4 mr-2" />
+              Pagar fornecedor ({formatCurrency(totalPendente)})
+            </Button>
+          )}
           {list.status === 'DIGITADA' && products.length > 0 && (
             <Button variant="secondary" onClick={() => updateStatus.mutate(ListStatus.EXPORTADA)}>
               <FileText className="w-4 h-4 mr-2" />
@@ -293,6 +246,7 @@ export default function ConsignacaoDetalhe() {
         <Table>
           <TableHead>
             <TableRow>
+              <TableHeader className="w-16">Foto</TableHeader>
               <TableHeader>Código</TableHeader>
               <TableHeader>Descrição</TableHeader>
               <TableHeader>Cor</TableHeader>
@@ -311,8 +265,29 @@ export default function ConsignacaoDetalhe() {
             ) : (
               products.map((product: Product) => (
                 <TableRow key={product.id}>
+                  <TableCell>
+                    {productPhotoUrl(product) ? (
+                      <img
+                        src={productPhotoUrl(product)!}
+                        alt={product.descricao}
+                        loading="lazy"
+                        className="w-12 h-12 rounded-md object-cover border"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-md bg-gray-100 flex items-center justify-center" title="Sem foto">
+                        <ImageOff className="w-4 h-4 text-gray-400" />
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="font-mono text-sm">{product.codigo_barras}</TableCell>
-                  <TableCell className="font-medium">{product.descricao}</TableCell>
+                  <TableCell className="font-medium">
+                    {product.descricao}
+                    {product.canal === 'DIGITAL' && (
+                      <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-normal bg-purple-100 text-purple-700">
+                        <Globe className="w-3 h-3" /> Digital
+                      </span>
+                    )}
+                  </TableCell>
                   <TableCell>{product.cor}</TableCell>
                   <TableCell>{product.marca}</TableCell>
                   <TableCell>{product.tamanho}</TableCell>
@@ -323,6 +298,11 @@ export default function ConsignacaoDetalhe() {
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[product.status]}`}>
                       {product.status}
                     </span>
+                    {product.status === 'VENDIDO' && (
+                      <span className={`ml-1 text-xs ${product.pago_fornecedor ? 'text-green-600' : 'text-orange-600'}`}>
+                        {product.pago_fornecedor ? 'pago' : 'a pagar'}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {product.status === 'DISPONIVEL' && list.status !== 'FINALIZADA' && (
@@ -351,147 +331,43 @@ export default function ConsignacaoDetalhe() {
         </Table>
       </div>
 
-      {/* Modal de adicionar/editar produto */}
-      <Modal
-        isOpen={showAddProductModal}
-        onClose={() => {
-          setShowAddProductModal(false);
-          setEditingProduct(null);
-          resetForm();
-        }}
-        title={editingProduct ? 'Editar Peça' : 'Adicionar Peça'}
-        size="lg"
-      >
-        <form onSubmit={handleSubmitProduct} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <label className="label">Descrição *</label>
-              <input
-                list="descriptions"
-                className="input"
-                value={productForm.descricao}
-                onChange={(e) => setProductForm({ ...productForm, descricao: e.target.value })}
-                required
-              />
-              <datalist id="descriptions">
-                {auxiliaries?.descriptions.map((d) => (
-                  <option key={d.id} value={d.nome} />
-                ))}
-              </datalist>
-            </div>
-
-            <div>
-              <label className="label">Cor</label>
-              <input
-                list="colors"
-                className="input"
-                value={productForm.cor}
-                onChange={(e) => setProductForm({ ...productForm, cor: e.target.value })}
-              />
-              <datalist id="colors">
-                {auxiliaries?.colors.map((c) => (
-                  <option key={c.id} value={c.nome} />
-                ))}
-              </datalist>
-            </div>
-
-            <div>
-              <label className="label">Marca</label>
-              <input
-                list="brands"
-                className="input"
-                value={productForm.marca}
-                onChange={(e) => setProductForm({ ...productForm, marca: e.target.value })}
-              />
-              <datalist id="brands">
-                {auxiliaries?.brands.map((b) => (
-                  <option key={b.id} value={b.nome} />
-                ))}
-              </datalist>
-            </div>
-
-            <div>
-              <label className="label">Tamanho</label>
-              <input
-                list="sizes"
-                className="input"
-                value={productForm.tamanho}
-                onChange={(e) => setProductForm({ ...productForm, tamanho: e.target.value })}
-              />
-              <datalist id="sizes">
-                {auxiliaries?.sizes.map((s) => (
-                  <option key={s.id} value={s.nome} />
-                ))}
-              </datalist>
-            </div>
-
-            <Select
-              label="Condição"
-              options={[
-                { value: 'NOVA', label: 'Nova' },
-                { value: 'SEMI_NOVA', label: 'Semi Nova' },
-                { value: 'USADA', label: 'Usada' },
-              ]}
-              value={productForm.condicao}
-              onChange={(e) => setProductForm({ ...productForm, condicao: e.target.value as ProductCondition })}
-            />
-
-            <div className="col-span-2">
-              <Input
-                label="Defeitos"
-                value={productForm.defeitos}
-                onChange={(e) => setProductForm({ ...productForm, defeitos: e.target.value })}
-                placeholder="Descreva os defeitos se houver..."
-              />
-            </div>
-
-            <Input
-              label="Valor de Compra (R$) *"
-              type="number"
-              step="0.01"
-              min="0"
-              value={productForm.valor_compra}
-              onChange={(e) => {
-                const valorCompra = e.target.value;
-                setProductForm({
-                  ...productForm,
-                  valor_compra: valorCompra,
-                  // Sugerir valor de venda como 2x o valor de compra
-                  valor_venda: productForm.valor_venda || String(Number(valorCompra) * 2),
-                });
-              }}
-              required
-            />
-
-            <Input
-              label="Valor de Venda (R$) *"
-              type="number"
-              step="0.01"
-              min="0"
-              value={productForm.valor_venda}
-              onChange={(e) => setProductForm({ ...productForm, valor_venda: e.target.value })}
-              required
-            />
+      {/* Pagamentos ao fornecedor */}
+      {payments.length > 0 && (
+        <div className="card">
+          <div className="p-4 border-b">
+            <h2 className="font-semibold text-gray-900">Pagamentos ao Fornecedor</h2>
           </div>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Data</TableHeader>
+                <TableHeader>Peças</TableHeader>
+                <TableHeader className="text-right">Valor</TableHeader>
+                <TableHeader>Registrado por</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {payments.map((payment) => (
+                <TableRow key={payment.id}>
+                  <TableCell>{formatDateTime(payment.created_at)}</TableCell>
+                  <TableCell>{payment.quantidade_pecas}</TableCell>
+                  <TableCell className="text-right font-medium">{formatCurrency(payment.valor)}</TableCell>
+                  <TableCell>{payment.usuario_nome || '-'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
-          <ModalFooter>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setShowAddProductModal(false);
-                setEditingProduct(null);
-                resetForm();
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" isLoading={addProduct.isPending || updateProduct.isPending}>
-              {editingProduct ? 'Salvar' : 'Adicionar'}
-            </Button>
-          </ModalFooter>
-        </form>
-      </Modal>
+      {/* Modal de adicionar/editar peça (fotos, IA e canal de venda) */}
+      <ProductFormModal
+        isOpen={showAddProductModal}
+        listId={Number(id)}
+        product={editingProduct}
+        onClose={closeProductModal}
+        onSaved={() => queryClient.invalidateQueries({ queryKey: ['consignment', id] })}
+      />
     </div>
   );
 }

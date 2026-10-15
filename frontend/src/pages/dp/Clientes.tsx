@@ -8,14 +8,13 @@ import {
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading
 } from '../../components/ui';
 import type { Customer } from '../../types';
-
-const formatDate = (date: string | null) => {
-  if (!date) return '-';
-  return new Date(date).toLocaleDateString('pt-BR');
-};
+import { formatDate } from '../../utils/format';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function Clientes() {
   const queryClient = useQueryClient();
+  // Exclusões são restritas ao administrador
+  const { isAdmin } = useAuth();
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -212,11 +211,13 @@ export default function Clientes() {
                       <Button variant="ghost" size="sm" onClick={() => openEdit(customer)}>
                         <Edit2 className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        if (confirm('Excluir cliente?')) deleteCustomer.mutate(customer.id);
-                      }}>
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </Button>
+                      {isAdmin && (
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          if (confirm('Excluir cliente?')) deleteCustomer.mutate(customer.id);
+                        }}>
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -8,12 +8,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.3.2",
     "@tanstack/react-query": "^5.17.0",
     "axios": "^1.6.2",
     "date-fns": "^3.0.6",
-    "jspdf": "^2.5.1",
-    "jspdf-autotable": "^3.8.1",
     "jsbarcode": "^3.11.6",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
     "lucide-react": "^0.303.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -21,8 +22,7 @@
     "react-hot-toast": "^2.4.1",
     "react-router-dom": "^6.21.1",
     "react-to-print": "^2.15.1",
-    "zod": "^3.22.4",
-    "@hookform/resolvers": "^3.3.2"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",

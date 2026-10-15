@@ -7,18 +7,17 @@ import {
   Button, Input, Modal, ModalFooter,
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading
 } from '../../components/ui';
-import type { TimeClockRecord, Employee, WorkSchedule } from '../../types';
+import type { TimeClockRecord, WorkSchedule } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
+import { formatDate, todayISO, addDaysISO } from '../../utils/format';
 
 export default function Ponto() {
   const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedEmployee, setSelectedEmployee] = useState('');
-  const [dataInicio, setDataInicio] = useState(() => {
-    const date = new Date();
-    date.setDate(date.getDate() - 7);
-    return date.toISOString().split('T')[0];
-  });
-  const [dataFim, setDataFim] = useState(() => new Date().toISOString().split('T')[0]);
+  const [dataInicio, setDataInicio] = useState(() => addDaysISO(todayISO(), -7));
+  const [dataFim, setDataFim] = useState(() => todayISO());
   const [showEditModal, setShowEditModal] = useState(false);
   const [showJornadaModal, setShowJornadaModal] = useState(false);
   const [editingRecord, setEditingRecord] = useState<TimeClockRecord | null>(null);
@@ -40,9 +39,10 @@ export default function Ponto() {
     return () => clearInterval(timer);
   }, []);
 
+  // Lista resumida (id e nome): disponível também para o operador, sem dados salariais
   const { data: employees } = useQuery({
-    queryKey: ['employees-active'],
-    queryFn: () => employeesApi.getAll({ status: 'ativo' }),
+    queryKey: ['employees-options'],
+    queryFn: employeesApi.getOptions,
   });
 
   const { data: records, isLoading } = useQuery({
@@ -53,6 +53,7 @@ export default function Ponto() {
   const { data: jornada } = useQuery({
     queryKey: ['jornada'],
     queryFn: () => jornadaApi.get(),
+    enabled: isAdmin,
   });
 
   useEffect(() => {
@@ -71,12 +72,11 @@ export default function Ponto() {
   }, [jornada]);
 
   const registrarPonto = useMutation({
+    // Data e hora são definidas pelo servidor no momento do registro
     mutationFn: (tipo: 'entrada' | 'saida') => {
       if (!selectedEmployee) throw new Error('Selecione um funcionario');
-      const emp = employees?.find((e: Employee) => e.nome === selectedEmployee);
       return timeclockApi.registrar({
-        funcionario_id: emp?.id,
-        funcionario_nome: selectedEmployee,
+        funcionario_id: Number(selectedEmployee),
         tipo
       });
     },
@@ -136,16 +136,17 @@ export default function Ponto() {
     }
   };
 
-  const formatDate = (date: string) => new Date(date).toLocaleDateString('pt-BR');
   const formatTime = (time: string) => time.substring(0, 5);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Controle de Ponto</h1>
-        <Button variant="secondary" onClick={() => setShowJornadaModal(true)}>
-          <Settings className="w-4 h-4 mr-2" /> Configurar Jornada
-        </Button>
+        {isAdmin && (
+          <Button variant="secondary" onClick={() => setShowJornadaModal(true)}>
+            <Settings className="w-4 h-4 mr-2" /> Configurar Jornada
+          </Button>
+        )}
       </div>
 
       {/* Relogio e Registro */}
@@ -178,8 +179,8 @@ export default function Ponto() {
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 text-lg"
               >
                 <option value="">Selecione um funcionario...</option>
-                {employees?.map((emp: Employee) => (
-                  <option key={emp.id} value={emp.nome}>{emp.nome}</option>
+                {employees?.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.nome}</option>
                 ))}
               </select>
             </div>
@@ -237,7 +238,7 @@ export default function Ponto() {
               <TableHeader>Hora</TableHeader>
               <TableHeader>Tipo</TableHeader>
               <TableHeader>Observacao</TableHeader>
-              <TableHeader className="w-24">Acoes</TableHeader>
+              {isAdmin && <TableHeader className="w-24">Acoes</TableHeader>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -257,18 +258,20 @@ export default function Ponto() {
                     </span>
                   </TableCell>
                   <TableCell className="text-gray-500">{record.observacao || '-'}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(record)}>
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        if (confirm('Excluir registro?')) deleteRecord.mutate(record.id);
-                      }}>
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </TableCell>
+                  {isAdmin && (
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(record)}>
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          if (confirm('Excluir registro?')) deleteRecord.mutate(record.id);
+                        }}>
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}

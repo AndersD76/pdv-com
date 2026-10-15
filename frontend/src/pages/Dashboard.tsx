@@ -12,6 +12,7 @@ import {
 import { dashboardApi } from '../services/api';
 import { Button } from '../components/ui';
 import { PaymentMethod } from '../types';
+import { formatDate } from '../utils/format';
 
 export default function Dashboard() {
   const { data, isLoading } = useQuery({
@@ -24,10 +25,6 @@ export default function Dashboard() {
       style: 'currency',
       currency: 'BRL',
     }).format(value || 0);
-  };
-
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString('pt-BR');
   };
 
   const paymentMethodLabels: Record<PaymentMethod, string> = {

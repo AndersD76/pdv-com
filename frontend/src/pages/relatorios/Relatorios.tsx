@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import {
   FileText,
   Calendar,
   Users,
   Truck,
   TrendingUp,
-  Filter
+  Filter,
+  XCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { salesApi, sellersApi, consignmentsApi, suppliersApi } from '../../services/api';
 import {
@@ -22,6 +25,7 @@ import {
 } from '../../components/ui';
 import { PaymentMethod } from '../../types';
 import type { Sale, Seller, SellerCommission } from '../../types';
+import { formatCurrency, formatDate, formatTime, todayISO, firstDayOfMonthISO } from '../../utils/format';
 
 interface CommissionReportItem {
   seller: Seller;
@@ -44,9 +48,9 @@ const paymentLabels: Record<PaymentMethod, string> = {
 type TabType = 'vendas' | 'comissoes' | 'fornecedores';
 
 export default function Relatorios() {
-  const today = new Date().toISOString().split('T')[0];
-  const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-    .toISOString().split('T')[0];
+  const queryClient = useQueryClient();
+  const today = todayISO();
+  const firstDayOfMonth = firstDayOfMonthISO();
 
   const [activeTab, setActiveTab] = useState<TabType>('vendas');
   const [inicio, setInicio] = useState(firstDayOfMonth);
@@ -144,8 +148,59 @@ export default function Relatorios() {
     enabled: activeTab === 'fornecedores',
   });
 
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
+  const cancelSale = useMutation({
+    mutationFn: ({ id, motivo }: { id: number; motivo?: string }) => salesApi.cancel(id, motivo),
+    onSuccess: () => {
+      toast.success('Venda cancelada. As peças voltaram ao estoque.');
+      queryClient.invalidateQueries({ queryKey: ['dailyReport'] });
+      queryClient.invalidateQueries({ queryKey: ['salesReport'] });
+      queryClient.invalidateQueries({ queryKey: ['commissionReport'] });
+      queryClient.invalidateQueries({ queryKey: ['quickStats'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const payCommissions = useMutation({
+    mutationFn: (ids: number[]) => sellersApi.payCommissions(ids),
+    onSuccess: () => {
+      toast.success('Comissões marcadas como pagas');
+      queryClient.invalidateQueries({ queryKey: ['commissionReport'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const paySupplier = useMutation({
+    mutationFn: (listId: number) => consignmentsApi.markAsPaid(listId),
+    onSuccess: (payment) => {
+      toast.success(`Pagamento de ${formatCurrency(payment.valor)} registrado`);
+      queryClient.invalidateQueries({ queryKey: ['paymentReport'] });
+      queryClient.invalidateQueries({ queryKey: ['consignment'] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  const handleCancelSale = (sale: Sale) => {
+    const motivo = prompt(`Cancelar a venda ${sale.codigo} (${formatCurrency(sale.valor_final)})?\nAs peças voltam ao estoque.\n\nMotivo (opcional):`);
+    if (motivo === null) return;
+    cancelSale.mutate({ id: sale.id, motivo: motivo || undefined });
+  };
+
+  const handlePayCommissions = (report: CommissionReportItem) => {
+    const pending = report.commissions.filter((c) => !c.pago);
+    const total = pending.reduce((sum, c) => sum + Number(c.valor_comissao || 0), 0);
+    if (pending.length === 0) return;
+    if (confirm(`Marcar ${pending.length} comissão(ões) de ${report.seller.nome} como paga(s)? Total: ${formatCurrency(total)}`)) {
+      payCommissions.mutate(pending.map((c) => c.id));
+    }
+  };
+
+  const handlePaySupplier = (item: { id: number; codigo: string; fornecedor_nome: string; valor_a_pagar: number }) => {
+    if (confirm(`Registrar pagamento de ${formatCurrency(item.valor_a_pagar)} para ${item.fornecedor_nome} (lista ${item.codigo})?`)) {
+      paySupplier.mutate(item.id);
+    }
+  };
 
   const handleFilter = () => {
     if (activeTab === 'vendas') refetchSales();
@@ -365,24 +420,51 @@ export default function Relatorios() {
                   <TableHeader>Itens</TableHeader>
                   <TableHeader>Pagamento</TableHeader>
                   <TableHeader className="text-right">Valor</TableHeader>
+                  <TableHeader className="w-24">Ações</TableHeader>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {!dailyReport?.sales || dailyReport.sales.length === 0 ? (
                   <TableEmpty message="Nenhuma venda hoje" />
                 ) : (
-                  dailyReport.sales.map((sale: Sale) => (
-                    <TableRow key={sale.id}>
-                      <TableCell className="font-mono">{sale.codigo}</TableCell>
-                      <TableCell>{new Date(sale.data_venda).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</TableCell>
-                      <TableCell>{sale.vendedora_nome || '-'}</TableCell>
-                      <TableCell>{sale.total_itens}</TableCell>
-                      <TableCell>{paymentLabels[sale.forma_pagamento]}</TableCell>
-                      <TableCell className="text-right font-semibold text-green-600">
-                        {formatCurrency(sale.valor_final)}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  dailyReport.sales.map((sale: Sale) => {
+                    const cancelada = sale.status === 'CANCELADA';
+                    return (
+                      <TableRow key={sale.id} className={cancelada ? 'opacity-60' : ''}>
+                        <TableCell className="font-mono">
+                          <span className={cancelada ? 'line-through' : ''}>{sale.codigo}</span>
+                          {cancelada && (
+                            <span
+                              className="ml-2 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700"
+                              title={sale.motivo_cancelamento || undefined}
+                            >
+                              Cancelada
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>{formatTime(sale.data_venda)}</TableCell>
+                        <TableCell>{sale.vendedora_nome || '-'}</TableCell>
+                        <TableCell>{sale.total_itens}</TableCell>
+                        <TableCell>{paymentLabels[sale.forma_pagamento]}</TableCell>
+                        <TableCell className={`text-right font-semibold ${cancelada ? 'line-through text-gray-500' : 'text-green-600'}`}>
+                          {formatCurrency(sale.valor_final)}
+                        </TableCell>
+                        <TableCell>
+                          {!cancelada && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCancelSale(sale)}
+                              disabled={cancelSale.isPending}
+                              title="Cancelar venda"
+                            >
+                              <XCircle className="w-4 h-4 text-red-500" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -433,6 +515,7 @@ export default function Relatorios() {
                   <TableHeader className="text-right">Total Comissões</TableHeader>
                   <TableHeader className="text-right">Pago</TableHeader>
                   <TableHeader className="text-right">Pendente</TableHeader>
+                  <TableHeader className="w-32">Ações</TableHeader>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -453,6 +536,18 @@ export default function Relatorios() {
                         </TableCell>
                         <TableCell className="text-right text-orange-600">
                           {formatCurrency(report.totals?.total_pendente || 0)}
+                        </TableCell>
+                        <TableCell>
+                          {report.commissions.some((c) => !c.pago) && (
+                            <Button
+                              variant="success"
+                              size="sm"
+                              onClick={() => handlePayCommissions(report)}
+                              isLoading={payCommissions.isPending}
+                            >
+                              <CheckCircle2 className="w-4 h-4 mr-1" /> Pagar
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
@@ -501,9 +596,11 @@ export default function Relatorios() {
                   <TableHeader>Fornecedor</TableHeader>
                   <TableHeader>Lista</TableHeader>
                   <TableHeader>Peças Vendidas</TableHeader>
-                  <TableHeader className="text-right">Valor a Pagar</TableHeader>
+                  <TableHeader className="text-right">Já Pago</TableHeader>
+                  <TableHeader className="text-right">Pendente</TableHeader>
                   <TableHeader>Status</TableHeader>
-                  <TableHeader>Data Pagamento</TableHeader>
+                  <TableHeader>Último Pagamento</TableHeader>
+                  <TableHeader className="w-32">Ações</TableHeader>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -516,6 +613,7 @@ export default function Relatorios() {
                     fornecedor_nome: string;
                     pecas_vendidas: number;
                     valor_a_pagar: number;
+                    valor_pago: number;
                     pago: boolean;
                     data_pagamento: string | null;
                   }) => (
@@ -523,22 +621,35 @@ export default function Relatorios() {
                       <TableCell className="font-medium">{item.fornecedor_nome}</TableCell>
                       <TableCell className="font-mono">{item.codigo}</TableCell>
                       <TableCell>{item.pecas_vendidas || 0}</TableCell>
+                      <TableCell className="text-right text-green-600">
+                        {formatCurrency(item.valor_pago || 0)}
+                      </TableCell>
                       <TableCell className="text-right font-semibold">
                         {formatCurrency(item.valor_a_pagar || 0)}
                       </TableCell>
                       <TableCell>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          item.pago
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-orange-100 text-orange-700'
+                          item.valor_a_pagar > 0
+                            ? 'bg-orange-100 text-orange-700'
+                            : item.pago
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-600'
                         }`}>
-                          {item.pago ? 'Pago' : 'Pendente'}
+                          {item.valor_a_pagar > 0 ? 'Pendente' : item.pago ? 'Pago' : 'Sem vendas'}
                         </span>
                       </TableCell>
+                      <TableCell>{formatDate(item.data_pagamento)}</TableCell>
                       <TableCell>
-                        {item.data_pagamento
-                          ? new Date(item.data_pagamento).toLocaleDateString('pt-BR')
-                          : '-'}
+                        {item.valor_a_pagar > 0 && (
+                          <Button
+                            variant="success"
+                            size="sm"
+                            onClick={() => handlePaySupplier(item)}
+                            isLoading={paySupplier.isPending}
+                          >
+                            <CheckCircle2 className="w-4 h-4 mr-1" /> Pagar
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))

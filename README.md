@@ -72,9 +72,38 @@ cd ../frontend
 npm install
 ```
 
-### 2. Configurar banco de dados
+### 2. Configurar variáveis de ambiente
 
-O arquivo `.env` já está configurado com as credenciais do Neon Database.
+Copie `backend/.env.example` para `backend/.env` e preencha (no Railway, cadastre as mesmas variáveis no serviço):
+
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `DATABASE_URL` | sim | Conexão com o Neon Database |
+| `SESSION_SECRET` | sim, em produção | Chave que assina as sessões de login. Sem ela, todos precisam logar de novo a cada reinício |
+| `ADMIN_PASSWORD` | não | Senha provisória do usuário `admin` criado no primeiro boot. Se ausente, uma senha é gerada e mostrada no log |
+| `APP_TIMEZONE` | não | Fuso do negócio (padrão `America/Sao_Paulo`): define "hoje" nos relatórios e a hora do ponto |
+| `CORS_ORIGIN` | não | Só se o frontend for servido de outro domínio (origens separadas por vírgula) |
+| `ANTHROPIC_API_KEY` | para a IA | Chave da API da Anthropic usada no cadastro de peças por foto |
+| `ANTHROPIC_MODEL` | não | Modelo da IA (padrão `claude-opus-5-5`) |
+| `LOJA_NOME` | não | Nome exibido na loja online |
+| `LOJA_INSTAGRAM` | para a loja | Usuário do Instagram (sem @) do botão "Comprar pelo Instagram" |
+| `LOJA_WHATSAPP` | não | WhatsApp (DDI+DDD+número) do botão "Comprar pelo WhatsApp" |
+| `PUBLIC_URL` | recomendado | Endereço público da loja (domínio próprio), usado nos links do feed do Instagram |
+| `FACEBOOK_DOMAIN_VERIFICATION` | não | Código da meta tag de verificação de domínio do Meta |
+
+### Cadastro por foto e loja online
+
+- No cadastro de uma peça, tire ou envie a foto (até 3: a primeira é a principal; inclua a etiqueta). A IA preenche descrição, cor, marca, tamanho, condição, defeitos, preço sugerido e o texto da loja; confira e salve.
+- Cada peça é marcada como **Loja física** ou **Loja digital (Instagram)**. Peças digitais com foto aparecem em `/loja` (vitrine pública) e em `/loja/feed.csv` (feed do catálogo do Meta). Ao serem vendidas no PDV, saem da vitrine e ficam "fora de estoque" no feed.
+- O passo a passo para conectar o Instagram está na tela **Loja Online** (menu do administrador).
+
+### Acesso e perfis
+
+No primeiro boot é criado o usuário `admin`; a troca de senha é exigida no primeiro acesso.
+Os demais usuários são criados em **Usuários** (menu do administrador).
+
+- **Operador (caixa):** PDV, consignações, produtos, etiquetas, fornecedores, cadastros, clientes e registro de ponto
+- **Administrador:** tudo, incluindo relatórios, cancelamento de vendas, pagamentos (fornecedores e comissões), vendedoras, DP e usuários
 
 ### 3. Inicializar banco e popular dados
 
@@ -125,8 +154,9 @@ npm run dev
 4. **Gerar etiquetas** com código de barras
 5. **Exportar lista** (PDF para aprovação do fornecedor)
 6. **Vender peças** no PDV (leitura do código de barras)
-7. **Finalizar lista** quando todas peças vendidas/devolvidas
-8. **Pagar comissões** às vendedoras
+7. **Pagar o fornecedor** pelas peças vendidas (pode ser feito várias vezes; cada pagamento quita o que foi vendido até ali)
+8. **Finalizar lista** quando todas peças vendidas/devolvidas
+9. **Pagar comissões** às vendedoras
 
 ## API Endpoints
 
@@ -161,6 +191,14 @@ npm run dev
 
 ### Vendas
 - `GET /api/sales` - Listar vendas
-- `POST /api/sales` - Criar venda
-- `DELETE /api/sales/:id` - Cancelar venda
+- `POST /api/sales` - Criar venda (o preço vem do cadastro de cada peça)
+- `PATCH /api/sales/:id/cancel` - Cancelar venda (mantém o histórico; bloqueado se a peça ou a comissão já foram pagas)
+
+### Autenticação
+- `POST /api/auth/login` - Entrar (cria cookie de sessão)
+- `POST /api/auth/logout` - Sair
+- `GET /api/auth/me` - Usuário logado
+- `POST /api/auth/change-password` - Trocar senha
+
+Todas as demais rotas exigem login; requisições que alteram dados exigem o cabeçalho `X-Requested-With: XMLHttpRequest` (enviado automaticamente pelo frontend).
 - `GET /api/sales/daily-report` - Relatório diário

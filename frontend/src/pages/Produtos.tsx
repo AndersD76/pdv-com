@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Package } from 'lucide-react';
-import { productsApi } from '../services/api';
+import { Search, Package, ImageOff } from 'lucide-react';
+import { productsApi, productPhotoUrl } from '../services/api';
 import { Input, Select, Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading } from '../components/ui';
-import type { Product, ProductStatus } from '../types';
+import type { Product, ProductStatus, ProductChannel } from '../types';
 
 const statusColors: Record<ProductStatus, string> = {
   DISPONIVEL: 'bg-green-100 text-green-800',
@@ -20,10 +20,15 @@ const statusLabels: Record<ProductStatus, string> = {
 export default function Produtos() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [canalFilter, setCanalFilter] = useState<ProductChannel | ''>('');
 
   const { data: products, isLoading } = useQuery({
-    queryKey: ['products', { search, status: statusFilter }],
-    queryFn: () => productsApi.getAll({ search: search || undefined, status: statusFilter || undefined }),
+    queryKey: ['products', { search, status: statusFilter, canal: canalFilter }],
+    queryFn: () => productsApi.getAll({
+      search: search || undefined,
+      status: statusFilter || undefined,
+      canal: canalFilter || undefined,
+    }),
   });
 
   const formatCurrency = (value: number) =>
@@ -61,6 +66,16 @@ export default function Produtos() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="w-48"
           />
+          <Select
+            options={[
+              { value: '', label: 'Todas as lojas' },
+              { value: 'FISICA', label: 'Loja física' },
+              { value: 'DIGITAL', label: 'Loja digital' },
+            ]}
+            value={canalFilter}
+            onChange={(e) => setCanalFilter(e.target.value as ProductChannel | '')}
+            className="w-48"
+          />
         </div>
       </div>
 
@@ -69,8 +84,10 @@ export default function Produtos() {
         <Table>
           <TableHead>
             <TableRow>
+              <TableHeader className="w-16">Foto</TableHeader>
               <TableHeader>Código</TableHeader>
               <TableHeader>Descrição</TableHeader>
+              <TableHeader>Loja</TableHeader>
               <TableHeader>Cor</TableHeader>
               <TableHeader>Marca</TableHeader>
               <TableHeader>Tamanho</TableHeader>
@@ -82,14 +99,35 @@ export default function Produtos() {
           </TableHead>
           <TableBody>
             {isLoading ? (
-              <TableLoading cols={9} />
+              <TableLoading cols={11} />
             ) : products?.length === 0 ? (
               <TableEmpty message="Nenhum produto encontrado" />
             ) : (
               products?.map((product: Product) => (
                 <TableRow key={product.id}>
+                  <TableCell>
+                    {productPhotoUrl(product) ? (
+                      <img
+                        src={productPhotoUrl(product)!}
+                        alt={product.descricao}
+                        loading="lazy"
+                        className="w-10 h-10 rounded-md object-cover border"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-md bg-gray-100 flex items-center justify-center" title="Sem foto">
+                        <ImageOff className="w-4 h-4 text-gray-400" />
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="font-mono text-sm">{product.codigo_barras}</TableCell>
                   <TableCell className="font-medium">{product.descricao}</TableCell>
+                  <TableCell>
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                      product.canal === 'DIGITAL' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {product.canal === 'DIGITAL' ? 'Digital' : 'Física'}
+                    </span>
+                  </TableCell>
                   <TableCell>{product.cor || '-'}</TableCell>
                   <TableCell>{product.marca || '-'}</TableCell>
                   <TableCell>{product.tamanho || '-'}</TableCell>

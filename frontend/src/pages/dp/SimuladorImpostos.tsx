@@ -13,12 +13,14 @@ const formatCurrency = (value: number) => {
 export default function SimuladorImpostos() {
   const [faturamentoMensal, setFaturamentoMensal] = useState('');
   const [tipoAtividade, setTipoAtividade] = useState<'comercio' | 'servicos' | 'industria'>('comercio');
+  const [aliquotaIcmsIss, setAliquotaIcmsIss] = useState('');
   const [result, setResult] = useState<TaxSimulationResult | null>(null);
 
   const simular = useMutation({
     mutationFn: () => simulatorsApi.simularImpostos({
       faturamento_mensal: parseFloat(faturamentoMensal),
-      tipo_atividade: tipoAtividade
+      tipo_atividade: tipoAtividade,
+      aliquota_icms_iss: aliquotaIcmsIss ? parseFloat(aliquotaIcmsIss) : 0
     }),
     onSuccess: (data) => {
       setResult(data);
@@ -82,6 +84,17 @@ export default function SimuladorImpostos() {
               })}
             </div>
           </div>
+
+          <Input
+            label="ICMS/ISS estimado no Lucro Presumido (% do faturamento)"
+            type="number"
+            step="0.01"
+            min="0"
+            max="30"
+            placeholder="Ex: 7.5"
+            value={aliquotaIcmsIss}
+            onChange={(e) => setAliquotaIcmsIss(e.target.value)}
+          />
 
           <Button
             onClick={() => simular.mutate()}
@@ -207,6 +220,13 @@ export default function SimuladorImpostos() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Avisos */}
+      {result && result.avisos.length > 0 && (
+        <div className="card p-4 bg-yellow-50 border border-yellow-200 text-sm text-yellow-800 space-y-1">
+          {result.avisos.map((aviso) => <p key={aviso}>{aviso}</p>)}
         </div>
       )}
 

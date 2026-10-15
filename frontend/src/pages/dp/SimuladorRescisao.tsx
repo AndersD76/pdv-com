@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { simulatorsApi } from '../../services/api';
 import { Button, Input } from '../../components/ui';
 import type { TerminationResult } from '../../types';
+import { formatDate, todayISO } from '../../utils/format';
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -14,7 +15,7 @@ export default function SimuladorRescisao() {
   const [form, setForm] = useState({
     salario_bruto: '',
     data_admissao: '',
-    data_demissao: new Date().toISOString().split('T')[0],
+    data_demissao: todayISO(),
     tipo_rescisao: 'sem_justa_causa' as 'sem_justa_causa' | 'com_justa_causa' | 'pedido_demissao' | 'acordo',
     saldo_fgts: '',
     aviso_previo_trabalhado: false,
@@ -58,7 +59,7 @@ export default function SimuladorRescisao() {
     terco_ferias_vencidas: '1/3 Ferias Vencidas',
     ferias_proporcionais: 'Ferias Proporcionais',
     terco_ferias_proporcionais: '1/3 Ferias Proporcionais',
-    decimo_terceiro_proporcional: '13o Proporcional',
+    decimo_terceiro_proporcional: `13o Proporcional${result ? ` (${result.resumo.meses_13}/12)` : ''}`,
     multa_fgts: 'Multa FGTS',
     saque_fgts: 'Saque FGTS'
   };
@@ -191,11 +192,11 @@ export default function SimuladorRescisao() {
                 </div>
                 <div>
                   <span className="text-gray-500">Admissao:</span>
-                  <p className="font-medium">{new Date(result.dados_contrato.data_admissao).toLocaleDateString('pt-BR')}</p>
+                  <p className="font-medium">{formatDate(result.dados_contrato.data_admissao)}</p>
                 </div>
                 <div>
                   <span className="text-gray-500">Demissao:</span>
-                  <p className="font-medium">{new Date(result.dados_contrato.data_demissao).toLocaleDateString('pt-BR')}</p>
+                  <p className="font-medium">{formatDate(result.dados_contrato.data_demissao)}</p>
                 </div>
               </div>
             </div>
@@ -284,6 +285,12 @@ export default function SimuladorRescisao() {
                   <Shield className="w-5 h-5" />
                   <span>O funcionario tem direito ao Seguro-Desemprego</span>
                 </div>
+              )}
+
+              {result.resumo.observacoes.length > 0 && (
+                <ul className="mt-4 text-xs text-gray-600 list-disc pl-4 space-y-1">
+                  {result.resumo.observacoes.map((obs) => <li key={obs}>{obs}</li>)}
+                </ul>
               )}
             </div>
           </div>

@@ -27,7 +27,8 @@ export default function Folha() {
     vale_transporte_perc: '6',
     vale_refeicao: '0',
     outros_descontos: '0',
-    outros_proventos: '0'
+    outros_proventos: '0',
+    regime_tributario: 'simples' as 'simples' | 'normal'
   });
 
   // Formulario 13o Salario
@@ -61,7 +62,8 @@ export default function Folha() {
       vale_transporte_perc: parseFloat(formMensal.vale_transporte_perc),
       vale_refeicao: parseFloat(formMensal.vale_refeicao),
       outros_descontos: parseFloat(formMensal.outros_descontos),
-      outros_proventos: parseFloat(formMensal.outros_proventos)
+      outros_proventos: parseFloat(formMensal.outros_proventos),
+      regime_tributario: formMensal.regime_tributario
     }),
     onSuccess: (data) => {
       setResult(data);
@@ -190,6 +192,17 @@ export default function Folha() {
                     onChange={(e) => setFormMensal({ ...formMensal, dependentes: e.target.value })}
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Regime tributário da empresa</label>
+                  <select
+                    value={formMensal.regime_tributario}
+                    onChange={(e) => setFormMensal({ ...formMensal, regime_tributario: e.target.value as 'simples' | 'normal' })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="simples">Simples Nacional (INSS patronal no DAS)</option>
+                    <option value="normal">Lucro Presumido / Real</option>
+                  </select>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <Input
                     label="Horas Extras"
@@ -311,7 +324,9 @@ export default function Folha() {
                         <span>-{formatCurrency(result.inss.valor)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>IRRF ({result.irrf.faixa})</span>
+                        <span>
+                          IRRF ({result.irrf.faixa}{result.irrf.desconto_simplificado ? ', desconto simplificado' : ''})
+                        </span>
                         <span>-{formatCurrency(result.irrf.valor)}</span>
                       </div>
                       {result.vale_transporte.valor > 0 && (
@@ -353,7 +368,9 @@ export default function Folha() {
                   <div className="text-xs text-gray-500 border-t pt-3">
                     <p className="font-medium mb-1">Encargos do Empregador:</p>
                     <p>FGTS (8%): {formatCurrency(result.encargos.fgts)} | INSS Patronal: {formatCurrency(result.encargos.inss_patronal)}</p>
+                    <p>{result.encargos.observacao}</p>
                     <p className="font-medium">Custo Total: {formatCurrency(result.total_proventos + result.encargos.total)}</p>
+                    <p className="mt-1">Tabelas de INSS/IRRF de {result.ano_tabela}. Confira os valores com a contabilidade.</p>
                   </div>
                 </div>
               )}
@@ -510,7 +527,7 @@ export default function Folha() {
                   <h3 className="font-semibold text-gray-900 border-b pb-2">Calculo de Ferias</h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span>Valor das Ferias ({String(resultFerias.dias_ferias)} dias)</span>
+                      <span>Valor das Ferias ({String(resultFerias.dias_gozo)} dias de gozo)</span>
                       <span>{formatCurrency(Number(resultFerias.valor_ferias))}</span>
                     </div>
                     <div className="flex justify-between">
@@ -520,7 +537,7 @@ export default function Folha() {
                     {Boolean((resultFerias.abono_pecuniario as Record<string, unknown>)?.vendido) && (
                       <>
                         <div className="flex justify-between text-green-600">
-                          <span>Abono Pecuniario</span>
+                          <span>Abono Pecuniario ({String((resultFerias.abono_pecuniario as Record<string, unknown>).dias)} dias vendidos)</span>
                           <span>+{formatCurrency(Number((resultFerias.abono_pecuniario as Record<string, unknown>).valor))}</span>
                         </div>
                         <div className="flex justify-between text-green-600">

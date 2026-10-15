@@ -1,50 +1,32 @@
 import { Request, Response } from 'express';
-import { sql, query } from '../database.js';
+import { sql, query, withTransaction, APP_TIMEZONE } from '../database.js';
 import { z } from 'zod';
-
-// Helper para converter valores numéricos (Neon retorna DECIMAL como string)
-function parseNumericFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === 'string' && !isNaN(Number(value)) && value !== '') {
-      result[key] = Number(value);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
+import { HttpError, sendError, parseDateParam, todayInAppTimezone, round2 } from '../utils/http.js';
 
 const saleSchema = z.object({
+  // O preço de cada item vem do cadastro do produto; valores enviados pelo cliente são ignorados
   itens: z.array(z.object({
-    produto_id: z.number().positive(),
-    valor_unitario: z.number().positive()
+    produto_id: z.number().int().positive()
   })).min(1, 'Pelo menos um item é obrigatório'),
   desconto: z.number().min(0).default(0),
   forma_pagamento: z.enum(['DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO']),
-  cliente_nome: z.string().optional(),
-  vendedora_id: z.number().positive().optional()
+  cliente_nome: z.string().max(255).optional(),
+  vendedora_id: z.number().int().positive().optional()
 });
 
-// Gerar próximo código de venda
-async function getNextSaleCode(): Promise<string> {
-  const [result] = await sql`
-    SELECT codigo FROM sales ORDER BY id DESC LIMIT 1
-  `;
+const cancelSchema = z.object({
+  motivo: z.string().trim().max(500).optional()
+});
 
-  if (!result) {
-    return 'V00001';
-  }
-
-  const lastNumber = parseInt(result.codigo.replace('V', ''));
-  const nextNumber = lastNumber + 1;
-  return `V${nextNumber.toString().padStart(5, '0')}`;
-}
+// Data local (fuso do negócio) de uma coluna TIMESTAMPTZ, para filtros por dia
+const localSaleDate = (tzParam: string) => `(s.data_venda AT TIME ZONE ${tzParam})::date`;
 
 // Listar vendas
 export async function getAll(req: Request, res: Response) {
   try {
-    const { inicio, fim, vendedora_id, forma_pagamento } = req.query;
+    const inicio = parseDateParam(req.query.inicio, 'inicio');
+    const fim = parseDateParam(req.query.fim, 'fim');
+    const { vendedora_id, forma_pagamento, status } = req.query;
 
     let queryStr = `
       SELECT s.*,
@@ -57,13 +39,21 @@ export async function getAll(req: Request, res: Response) {
 
     const params: unknown[] = [];
 
-    if (inicio && fim) {
-      params.push(inicio, fim);
-      queryStr += ` AND s.data_venda BETWEEN $${params.length - 1} AND $${params.length}`;
+    if (inicio || fim) {
+      params.push(APP_TIMEZONE);
+      const tz = `$${params.length}`;
+      if (inicio) {
+        params.push(inicio);
+        queryStr += ` AND ${localSaleDate(tz)} >= $${params.length}::date`;
+      }
+      if (fim) {
+        params.push(fim);
+        queryStr += ` AND ${localSaleDate(tz)} <= $${params.length}::date`;
+      }
     }
 
     if (vendedora_id) {
-      params.push(vendedora_id);
+      params.push(Number(vendedora_id));
       queryStr += ` AND s.vendedora_id = $${params.length}`;
     }
 
@@ -72,13 +62,17 @@ export async function getAll(req: Request, res: Response) {
       queryStr += ` AND s.forma_pagamento = $${params.length}`;
     }
 
+    if (status) {
+      params.push(status);
+      queryStr += ` AND s.status = $${params.length}`;
+    }
+
     queryStr += ' ORDER BY s.data_venda DESC LIMIT 500';
 
     const sales = await query(queryStr, params);
     res.json(sales);
   } catch (error) {
-    console.error('Erro ao listar vendas:', error);
-    res.status(500).json({ error: 'Erro ao listar vendas' });
+    sendError(res, error, 'Erro ao listar vendas');
   }
 }
 
@@ -110,8 +104,7 @@ export async function getById(req: Request, res: Response) {
 
     res.json({ ...sale, items });
   } catch (error) {
-    console.error('Erro ao buscar venda:', error);
-    res.status(500).json({ error: 'Erro ao buscar venda' });
+    sendError(res, error, 'Erro ao buscar venda');
   }
 }
 
@@ -119,137 +112,167 @@ export async function getById(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   try {
     const data = saleSchema.parse(req.body);
-
-    // Verificar se todos os produtos estão disponíveis
     const productIds = data.itens.map(i => i.produto_id);
 
-    const products = await sql`
-      SELECT id, status, valor_venda FROM products WHERE id = ANY(${productIds}::int[])
-    ` as Array<{ id: number; status: string; valor_venda: number }>;
-
-    if (products.length !== productIds.length) {
-      return res.status(400).json({ error: 'Um ou mais produtos não foram encontrados' });
+    if (new Set(productIds).size !== productIds.length) {
+      return res.status(400).json({ error: 'O mesmo produto foi informado mais de uma vez' });
     }
 
-    const unavailableProducts = products.filter((p) => p.status !== 'DISPONIVEL');
-    if (unavailableProducts.length > 0) {
-      return res.status(400).json({ error: 'Um ou mais produtos não estão disponíveis para venda' });
-    }
+    const saleId = await withTransaction(async (tx) => {
+      // FOR UPDATE trava as peças: uma segunda venda simultânea espera esta terminar
+      // e então enxerga o status VENDIDO
+      const products = await tx.query<{ id: number; codigo_barras: string; status: string; valor_venda: number }>(
+        'SELECT id, codigo_barras, status, valor_venda FROM products WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE',
+        [productIds]
+      );
 
-    // Calcular valores
-    const valorTotal = data.itens.reduce((sum, item) => sum + item.valor_unitario, 0);
-    const valorFinal = valorTotal - data.desconto;
+      if (products.length !== productIds.length) {
+        throw new HttpError(400, 'Um ou mais produtos não foram encontrados');
+      }
 
-    if (valorFinal < 0) {
-      return res.status(400).json({ error: 'Desconto não pode ser maior que o valor total' });
-    }
+      const unavailable = products.filter((p) => p.status !== 'DISPONIVEL');
+      if (unavailable.length > 0) {
+        throw new HttpError(409, `Produto(s) não disponível(is) para venda: ${unavailable.map(p => p.codigo_barras).join(', ')}`);
+      }
 
-    const codigo = await getNextSaleCode();
+      const desconto = round2(data.desconto);
+      const valorTotal = round2(products.reduce((sum, p) => sum + p.valor_venda, 0));
+      const valorFinal = round2(valorTotal - desconto);
 
-    // Criar venda
-    const [sale] = await sql`
-      INSERT INTO sales (codigo, valor_total, desconto, valor_final, forma_pagamento, cliente_nome, vendedora_id)
-      VALUES (${codigo}, ${valorTotal}, ${data.desconto}, ${valorFinal}, ${data.forma_pagamento},
-        ${data.cliente_nome || null}, ${data.vendedora_id || null})
-      RETURNING *
-    `;
+      if (valorFinal < 0) {
+        throw new HttpError(400, 'Desconto não pode ser maior que o valor total');
+      }
 
-    // Inserir itens da venda
-    for (const item of data.itens) {
-      await sql`
-        INSERT INTO sale_items (venda_id, produto_id, valor_unitario)
-        VALUES (${sale.id}, ${item.produto_id}, ${item.valor_unitario})
-      `;
+      let seller: { id: number; comissao_percentual: number } | null = null;
+      if (data.vendedora_id) {
+        seller = await tx.queryOne<{ id: number; comissao_percentual: number }>(
+          'SELECT id, comissao_percentual FROM sellers WHERE id = $1 AND ativo = TRUE',
+          [data.vendedora_id]
+        );
+        if (!seller) {
+          throw new HttpError(400, 'Vendedora não encontrada ou inativa');
+        }
+      }
 
-      // Atualizar status do produto para vendido
-      await sql`
-        UPDATE products SET status = 'VENDIDO', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ${item.produto_id}
-      `;
-    }
+      const sale = await tx.queryOne<{ id: number }>(
+        `INSERT INTO sales (codigo, valor_total, desconto, valor_final, forma_pagamento, cliente_nome, vendedora_id, usuario_id)
+         VALUES ('V' || LPAD(nextval('sales_codigo_seq')::text, 5, '0'), $1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [valorTotal, desconto, valorFinal, data.forma_pagamento, data.cliente_nome || null, seller?.id ?? null, req.user!.id]
+      );
 
-    // Se tem vendedora, calcular e registrar comissão
-    if (data.vendedora_id) {
-      const [seller] = await sql`SELECT * FROM sellers WHERE id = ${data.vendedora_id}`;
+      await tx.query(
+        `INSERT INTO sale_items (venda_id, produto_id, valor_unitario)
+         SELECT $1, id, valor_venda FROM products WHERE id = ANY($2::int[])`,
+        [sale!.id, productIds]
+      );
+
+      await tx.query(
+        `UPDATE products SET status = 'VENDIDO', updated_at = CURRENT_TIMESTAMP WHERE id = ANY($1::int[])`,
+        [productIds]
+      );
 
       if (seller) {
-        const percentualComissao = Number(seller.comissao_percentual);
-        const valorComissao = (valorFinal * percentualComissao) / 100;
-
-        await sql`
-          INSERT INTO seller_commissions (vendedora_id, venda_id, valor_venda, percentual_comissao, valor_comissao)
-          VALUES (${data.vendedora_id}, ${sale.id}, ${valorFinal}, ${percentualComissao}, ${valorComissao})
-        `;
+        const valorComissao = round2((valorFinal * seller.comissao_percentual) / 100);
+        await tx.query(
+          `INSERT INTO seller_commissions (vendedora_id, venda_id, valor_venda, percentual_comissao, valor_comissao)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [seller.id, sale!.id, valorFinal, seller.comissao_percentual, valorComissao]
+        );
       }
-    }
+
+      return sale!.id;
+    });
 
     // Buscar venda completa para retornar
     const [completeSale] = await sql`
       SELECT s.*, sl.nome as vendedora_nome
       FROM sales s
       LEFT JOIN sellers sl ON sl.id = s.vendedora_id
-      WHERE s.id = ${sale.id}
+      WHERE s.id = ${saleId}
     `;
 
     res.status(201).json(completeSale);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar venda:', error);
-    res.status(500).json({ error: 'Erro ao criar venda' });
+    sendError(res, error, 'Erro ao criar venda');
   }
 }
 
-// Cancelar venda
+// Cancelar venda (mantém o registro com status CANCELADA)
 export async function cancel(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
+    const { motivo } = cancelSchema.parse(req.body ?? {});
 
-    const [sale] = await sql`SELECT * FROM sales WHERE id = ${id}`;
-    if (!sale) {
-      return res.status(404).json({ error: 'Venda não encontrada' });
-    }
+    await withTransaction(async (tx) => {
+      const sale = await tx.queryOne<{ status: string }>('SELECT status FROM sales WHERE id = $1 FOR UPDATE', [id]);
+      if (!sale) {
+        throw new HttpError(404, 'Venda não encontrada');
+      }
+      if (sale.status === 'CANCELADA') {
+        throw new HttpError(400, 'Esta venda já foi cancelada');
+      }
 
-    // Buscar itens da venda
-    const items = await sql`SELECT * FROM sale_items WHERE venda_id = ${id}`;
+      const items = await tx.query<{ id: number; codigo_barras: string; pago_fornecedor: boolean; lista_status: string }>(
+        `SELECT p.id, p.codigo_barras, p.pago_fornecedor, cl.status AS lista_status
+         FROM sale_items si
+         JOIN products p ON p.id = si.produto_id
+         JOIN consignment_lists cl ON cl.id = p.lista_id
+         WHERE si.venda_id = $1
+         FOR UPDATE OF p`,
+        [id]
+      );
 
-    // Retornar produtos para status disponível
-    for (const item of items) {
-      await sql`
-        UPDATE products SET status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ${item.produto_id}
-      `;
-    }
+      // Se o dinheiro já foi repassado, devolver a peça ao estoque deixaria o caixa inconsistente
+      const pagasAoFornecedor = items.filter((i) => i.pago_fornecedor);
+      if (pagasAoFornecedor.length > 0) {
+        throw new HttpError(409, `Não é possível cancelar: peça(s) já paga(s) ao fornecedor (${pagasAoFornecedor.map(i => i.codigo_barras).join(', ')})`);
+      }
 
-    // Excluir comissões
-    await sql`DELETE FROM seller_commissions WHERE venda_id = ${id}`;
+      const emListaFinalizada = items.filter((i) => i.lista_status === 'FINALIZADA');
+      if (emListaFinalizada.length > 0) {
+        throw new HttpError(409, `Não é possível cancelar: peça(s) de lista já finalizada (${emListaFinalizada.map(i => i.codigo_barras).join(', ')})`);
+      }
 
-    // Excluir itens da venda
-    await sql`DELETE FROM sale_items WHERE venda_id = ${id}`;
+      const comissaoPaga = await tx.queryOne('SELECT 1 FROM seller_commissions WHERE venda_id = $1 AND pago = TRUE', [id]);
+      if (comissaoPaga) {
+        throw new HttpError(409, 'Não é possível cancelar: a comissão desta venda já foi paga');
+      }
 
-    // Excluir venda
-    await sql`DELETE FROM sales WHERE id = ${id}`;
+      await tx.query(
+        `UPDATE products SET status = 'DISPONIVEL', updated_at = CURRENT_TIMESTAMP
+         WHERE id = ANY($1::int[]) AND status = 'VENDIDO'`,
+        [items.map((i) => i.id)]
+      );
+
+      await tx.query('DELETE FROM seller_commissions WHERE venda_id = $1', [id]);
+
+      await tx.query(
+        `UPDATE sales
+         SET status = 'CANCELADA', cancelada_em = CURRENT_TIMESTAMP, cancelada_por = $2, motivo_cancelamento = $3
+         WHERE id = $1`,
+        [id, req.user!.id, motivo || null]
+      );
+    });
 
     res.json({ message: 'Venda cancelada com sucesso' });
   } catch (error) {
-    console.error('Erro ao cancelar venda:', error);
-    res.status(500).json({ error: 'Erro ao cancelar venda' });
+    sendError(res, error, 'Erro ao cancelar venda');
   }
 }
 
 // Relatório de vendas do dia
 export async function getDailySalesReport(req: Request, res: Response) {
   try {
-    const { data } = req.query;
-    const targetDate = data || new Date().toISOString().split('T')[0];
+    const targetDate = parseDateParam(req.query.data, 'data') || todayInAppTimezone();
 
+    // A lista inclui as canceladas (para conferência); os totais consideram só as concluídas
     const sales = await sql`
       SELECT s.*, sl.nome as vendedora_nome,
         (SELECT COUNT(*) FROM sale_items WHERE venda_id = s.id) as total_itens
       FROM sales s
       LEFT JOIN sellers sl ON sl.id = s.vendedora_id
-      WHERE DATE(s.data_venda) = ${targetDate}
+      WHERE (s.data_venda AT TIME ZONE ${APP_TIMEZONE})::date = ${targetDate}::date
       ORDER BY s.data_venda DESC
     `;
 
@@ -264,31 +287,25 @@ export async function getDailySalesReport(req: Request, res: Response) {
         COALESCE(SUM(CASE WHEN forma_pagamento = 'CARTAO_CREDITO' THEN valor_final ELSE 0 END), 0) as total_credito,
         COALESCE(SUM(CASE WHEN forma_pagamento = 'CARTAO_DEBITO' THEN valor_final ELSE 0 END), 0) as total_debito
       FROM sales
-      WHERE DATE(data_venda) = ${targetDate}
+      WHERE status = 'CONCLUIDA'
+        AND (data_venda AT TIME ZONE ${APP_TIMEZONE})::date = ${targetDate}::date
     `;
 
-    res.json({
-      date: targetDate,
-      sales: (sales as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
-      totals: parseNumericFields(totals as Record<string, unknown>)
-    });
+    res.json({ date: targetDate, sales, totals });
   } catch (error) {
-    console.error('Erro ao gerar relatório diário:', error);
-    res.status(500).json({ error: 'Erro ao gerar relatório' });
+    sendError(res, error, 'Erro ao gerar relatório');
   }
 }
 
-// Relatório de vendas por período
+// Relatório de vendas por período (datas inclusivas, no fuso do negócio)
 export async function getSalesReport(req: Request, res: Response) {
   try {
-    const { inicio, fim } = req.query;
+    const inicio = parseDateParam(req.query.inicio, 'inicio');
+    const fim = parseDateParam(req.query.fim, 'fim');
 
     if (!inicio || !fim) {
       return res.status(400).json({ error: 'Período é obrigatório (inicio e fim)' });
     }
-
-    // Adiciona fim do dia para incluir todas as vendas do dia final
-    const fimDoDia = `${fim} 23:59:59`;
 
     const [totals] = await sql`
       SELECT
@@ -297,13 +314,15 @@ export async function getSalesReport(req: Request, res: Response) {
         COALESCE(SUM(desconto), 0) as total_descontos,
         COALESCE(SUM(valor_final), 0) as valor_liquido
       FROM sales
-      WHERE data_venda >= ${inicio} AND data_venda <= ${fimDoDia}
+      WHERE status = 'CONCLUIDA'
+        AND (data_venda AT TIME ZONE ${APP_TIMEZONE})::date BETWEEN ${inicio}::date AND ${fim}::date
     `;
 
     const byPaymentMethod = await sql`
       SELECT forma_pagamento, COUNT(*) as quantidade, COALESCE(SUM(valor_final), 0) as total
       FROM sales
-      WHERE data_venda >= ${inicio} AND data_venda <= ${fimDoDia}
+      WHERE status = 'CONCLUIDA'
+        AND (data_venda AT TIME ZONE ${APP_TIMEZONE})::date BETWEEN ${inicio}::date AND ${fim}::date
       GROUP BY forma_pagamento
     `;
 
@@ -311,7 +330,8 @@ export async function getSalesReport(req: Request, res: Response) {
       SELECT sl.nome as vendedora, COUNT(s.id) as quantidade, COALESCE(SUM(s.valor_final), 0) as total
       FROM sales s
       LEFT JOIN sellers sl ON sl.id = s.vendedora_id
-      WHERE s.data_venda >= ${inicio} AND s.data_venda <= ${fimDoDia}
+      WHERE s.status = 'CONCLUIDA'
+        AND (s.data_venda AT TIME ZONE ${APP_TIMEZONE})::date BETWEEN ${inicio}::date AND ${fim}::date
       GROUP BY sl.id, sl.nome
       ORDER BY total DESC
     `;
@@ -321,7 +341,8 @@ export async function getSalesReport(req: Request, res: Response) {
       FROM sale_items si
       JOIN products p ON p.id = si.produto_id
       JOIN sales s ON s.id = si.venda_id
-      WHERE s.data_venda >= ${inicio} AND s.data_venda <= ${fimDoDia}
+      WHERE s.status = 'CONCLUIDA'
+        AND (s.data_venda AT TIME ZONE ${APP_TIMEZONE})::date BETWEEN ${inicio}::date AND ${fim}::date
       GROUP BY p.descricao, p.cor, p.marca
       ORDER BY quantidade DESC
       LIMIT 20
@@ -329,13 +350,12 @@ export async function getSalesReport(req: Request, res: Response) {
 
     res.json({
       periodo: { inicio, fim },
-      totals: parseNumericFields(totals as Record<string, unknown>),
-      byPaymentMethod: (byPaymentMethod as Record<string, unknown>[]).map((p) => parseNumericFields(p)),
-      bySeller: (bySeller as Record<string, unknown>[]).map((s) => parseNumericFields(s)),
-      topProducts: (topProducts as Record<string, unknown>[]).map((p) => parseNumericFields(p))
+      totals,
+      byPaymentMethod,
+      bySeller,
+      topProducts
     });
   } catch (error) {
-    console.error('Erro ao gerar relatório:', error);
-    res.status(500).json({ error: 'Erro ao gerar relatório' });
+    sendError(res, error, 'Erro ao gerar relatório');
   }
 }

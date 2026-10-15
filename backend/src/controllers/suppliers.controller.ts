@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { sql } from '../database.js';
+import { sendError } from '../utils/http.js';
 import { z } from 'zod';
 
 const supplierSchema = z.object({
@@ -28,8 +29,7 @@ export async function getAll(req: Request, res: Response) {
 
     res.json(suppliers);
   } catch (error) {
-    console.error('Erro ao listar fornecedores:', error);
-    res.status(500).json({ error: 'Erro ao listar fornecedores' });
+    sendError(res, error, 'Erro ao listar fornecedores');
   }
 }
 
@@ -46,8 +46,7 @@ export async function getById(req: Request, res: Response) {
 
     res.json(supplier);
   } catch (error) {
-    console.error('Erro ao buscar fornecedor:', error);
-    res.status(500).json({ error: 'Erro ao buscar fornecedor' });
+    sendError(res, error, 'Erro ao buscar fornecedor');
   }
 }
 
@@ -64,11 +63,7 @@ export async function create(req: Request, res: Response) {
 
     res.status(201).json(supplier);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar fornecedor:', error);
-    res.status(500).json({ error: 'Erro ao criar fornecedor' });
+    sendError(res, error, 'Erro ao criar fornecedor');
   }
 }
 
@@ -96,11 +91,7 @@ export async function update(req: Request, res: Response) {
 
     res.json(supplier);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao atualizar fornecedor:', error);
-    res.status(500).json({ error: 'Erro ao atualizar fornecedor' });
+    sendError(res, error, 'Erro ao atualizar fornecedor');
   }
 }
 
@@ -123,8 +114,7 @@ export async function remove(req: Request, res: Response) {
 
     res.json({ message: 'Fornecedor excluído com sucesso' });
   } catch (error) {
-    console.error('Erro ao excluir fornecedor:', error);
-    res.status(500).json({ error: 'Erro ao excluir fornecedor' });
+    sendError(res, error, 'Erro ao excluir fornecedor');
   }
 }
 
@@ -151,7 +141,6 @@ export async function getSupplierReport(req: Request, res: Response) {
 
     res.json({ supplier, lists });
   } catch (error) {
-    console.error('Erro ao gerar relatório:', error);
-    res.status(500).json({ error: 'Erro ao gerar relatório' });
+    sendError(res, error, 'Erro ao gerar relatório');
   }
 }

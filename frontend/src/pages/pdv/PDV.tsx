@@ -15,6 +15,10 @@ import { productsApi, salesApi, sellersApi } from '../../services/api';
 import { Button, Input, Select, Modal } from '../../components/ui';
 import { PaymentMethod } from '../../types';
 import type { Product, CartItem, Seller } from '../../types';
+import { formatCurrency } from '../../utils/format';
+
+// Códigos gerados pelo sistema: 4 dígitos da lista + 4 da peça
+const MIN_BARCODE_LENGTH = 8;
 
 export default function PDV() {
   const queryClient = useQueryClient();
@@ -22,7 +26,13 @@ export default function PDV() {
 
   const [barcode, setBarcode] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCartState] = useState<CartItem[]>([]);
+  // Cópia síncrona do carrinho: duas leituras rápidas não podem enxergar um carrinho desatualizado
+  const cartRef = useRef<CartItem[]>([]);
+  const setCart = (items: CartItem[]) => {
+    cartRef.current = items;
+    setCartState(items);
+  };
   const [discount, setDiscount] = useState(0);
   const [selectedSeller, setSelectedSeller] = useState<number | null>(null);
   const [clientName, setClientName] = useState('');
@@ -39,12 +49,11 @@ export default function PDV() {
     mutationFn: productsApi.getByBarcode,
     onSuccess: (product) => {
       addToCart(product);
-      setBarcode('');
       barcodeInputRef.current?.focus();
     },
     onError: () => {
       toast.error('Produto não encontrado');
-      setBarcode('');
+      barcodeInputRef.current?.focus();
     },
   });
 
@@ -63,7 +72,11 @@ export default function PDV() {
       setCart([]);
       setDiscount(0);
       setClientName('');
+      // Peças vendidas não podem continuar aparecendo como disponíveis
       queryClient.invalidateQueries({ queryKey: ['quickStats'] });
+      queryClient.invalidateQueries({ queryKey: ['productSearch'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       barcodeInputRef.current?.focus();
     },
     onError: (error: Error) => {
@@ -76,17 +89,19 @@ export default function PDV() {
     barcodeInputRef.current?.focus();
   }, []);
 
-  // Busca automática quando para de digitar (para leitores de código de barras)
+  // Busca o código e limpa o campo na hora (cancela a busca automática pendente)
+  const lookupBarcode = (code: string) => {
+    setBarcode('');
+    searchByBarcode.mutate(code);
+  };
+
+  // Busca automática para leitores que não enviam Enter: só com um código completo
+  // (assim quem digita à mão não recebe "não encontrado" no meio do código)
   useEffect(() => {
-    if (!barcode.trim()) return;
+    const code = barcode.trim();
+    if (!/^\d+$/.test(code) || code.length < MIN_BARCODE_LENGTH) return;
 
-    const timer = setTimeout(() => {
-      // Se o código tem pelo menos 4 caracteres, busca automaticamente
-      if (barcode.trim().length >= 4) {
-        searchByBarcode.mutate(barcode.trim());
-      }
-    }, 300); // 300ms delay para leitores de código de barras
-
+    const timer = setTimeout(() => lookupBarcode(code), 300);
     return () => clearTimeout(timer);
   }, [barcode]);
 
@@ -97,19 +112,18 @@ export default function PDV() {
       return;
     }
 
-    const exists = cart.find((item) => item.product.id === product.id);
-    if (exists) {
+    if (cartRef.current.some((item) => item.product.id === product.id)) {
       toast.error('Este produto já está no carrinho');
       return;
     }
 
-    setCart([...cart, { product, valor_unitario: Number(product.valor_venda) }]);
+    setCart([...cartRef.current, { product, valor_unitario: Number(product.valor_venda) }]);
     toast.success('Produto adicionado');
   };
 
   // Remover produto do carrinho
   const removeFromCart = (productId: number) => {
-    setCart(cart.filter((item) => item.product.id !== productId));
+    setCart(cartRef.current.filter((item) => item.product.id !== productId));
   };
 
   // Calcular totais
@@ -120,7 +134,7 @@ export default function PDV() {
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (barcode.trim()) {
-      searchByBarcode.mutate(barcode.trim());
+      lookupBarcode(barcode.trim());
     }
   };
 
@@ -131,23 +145,16 @@ export default function PDV() {
       return;
     }
 
+    // O preço é definido pelo servidor a partir do cadastro de cada peça
     createSale.mutate({
       itens: cart.map((item) => ({
         produto_id: Number(item.product.id),
-        valor_unitario: Number(item.valor_unitario),
       })),
       desconto: Number(discount) || 0,
       forma_pagamento: paymentMethod,
       cliente_nome: clientName || undefined,
       vendedora_id: selectedSeller ? Number(selectedSeller) : undefined,
     });
-  };
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    }).format(value);
   };
 
   return (

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { sql } from '../database.js';
+import { sendError } from '../utils/http.js';
 import { z } from 'zod';
 
 // Schema genérico para nome
@@ -18,8 +19,7 @@ export async function getDescriptions(req: Request, res: Response) {
     const descriptions = await sql`SELECT * FROM descriptions ORDER BY nome`;
     res.json(descriptions);
   } catch (error) {
-    console.error('Erro ao listar descrições:', error);
-    res.status(500).json({ error: 'Erro ao listar descrições' });
+    sendError(res, error, 'Erro ao listar descrições');
   }
 }
 
@@ -31,11 +31,7 @@ export async function createDescription(req: Request, res: Response) {
     `;
     res.status(201).json(description);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar descrição:', error);
-    res.status(500).json({ error: 'Erro ao criar descrição' });
+    sendError(res, error, 'Erro ao criar descrição');
   }
 }
 
@@ -45,8 +41,7 @@ export async function deleteDescription(req: Request, res: Response) {
     await sql`DELETE FROM descriptions WHERE id = ${id}`;
     res.json({ message: 'Descrição excluída' });
   } catch (error) {
-    console.error('Erro ao excluir descrição:', error);
-    res.status(500).json({ error: 'Erro ao excluir descrição' });
+    sendError(res, error, 'Erro ao excluir descrição');
   }
 }
 
@@ -56,8 +51,7 @@ export async function getColors(req: Request, res: Response) {
     const colors = await sql`SELECT * FROM colors ORDER BY nome`;
     res.json(colors);
   } catch (error) {
-    console.error('Erro ao listar cores:', error);
-    res.status(500).json({ error: 'Erro ao listar cores' });
+    sendError(res, error, 'Erro ao listar cores');
   }
 }
 
@@ -69,11 +63,7 @@ export async function createColor(req: Request, res: Response) {
     `;
     res.status(201).json(color);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar cor:', error);
-    res.status(500).json({ error: 'Erro ao criar cor' });
+    sendError(res, error, 'Erro ao criar cor');
   }
 }
 
@@ -83,8 +73,7 @@ export async function deleteColor(req: Request, res: Response) {
     await sql`DELETE FROM colors WHERE id = ${id}`;
     res.json({ message: 'Cor excluída' });
   } catch (error) {
-    console.error('Erro ao excluir cor:', error);
-    res.status(500).json({ error: 'Erro ao excluir cor' });
+    sendError(res, error, 'Erro ao excluir cor');
   }
 }
 
@@ -102,8 +91,7 @@ export async function getSizes(req: Request, res: Response) {
 
     res.json(sizes);
   } catch (error) {
-    console.error('Erro ao listar tamanhos:', error);
-    res.status(500).json({ error: 'Erro ao listar tamanhos' });
+    sendError(res, error, 'Erro ao listar tamanhos');
   }
 }
 
@@ -115,11 +103,7 @@ export async function createSize(req: Request, res: Response) {
     `;
     res.status(201).json(size);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar tamanho:', error);
-    res.status(500).json({ error: 'Erro ao criar tamanho' });
+    sendError(res, error, 'Erro ao criar tamanho');
   }
 }
 
@@ -129,8 +113,7 @@ export async function deleteSize(req: Request, res: Response) {
     await sql`DELETE FROM sizes WHERE id = ${id}`;
     res.json({ message: 'Tamanho excluído' });
   } catch (error) {
-    console.error('Erro ao excluir tamanho:', error);
-    res.status(500).json({ error: 'Erro ao excluir tamanho' });
+    sendError(res, error, 'Erro ao excluir tamanho');
   }
 }
 
@@ -140,8 +123,7 @@ export async function getBrands(req: Request, res: Response) {
     const brands = await sql`SELECT * FROM brands ORDER BY nome`;
     res.json(brands);
   } catch (error) {
-    console.error('Erro ao listar marcas:', error);
-    res.status(500).json({ error: 'Erro ao listar marcas' });
+    sendError(res, error, 'Erro ao listar marcas');
   }
 }
 
@@ -153,11 +135,7 @@ export async function createBrand(req: Request, res: Response) {
     `;
     res.status(201).json(brand);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar marca:', error);
-    res.status(500).json({ error: 'Erro ao criar marca' });
+    sendError(res, error, 'Erro ao criar marca');
   }
 }
 
@@ -167,8 +145,7 @@ export async function deleteBrand(req: Request, res: Response) {
     await sql`DELETE FROM brands WHERE id = ${id}`;
     res.json({ message: 'Marca excluída' });
   } catch (error) {
-    console.error('Erro ao excluir marca:', error);
-    res.status(500).json({ error: 'Erro ao excluir marca' });
+    sendError(res, error, 'Erro ao excluir marca');
   }
 }
 
@@ -184,7 +161,6 @@ export async function getAllAuxiliaries(req: Request, res: Response) {
 
     res.json({ descriptions, colors, sizes, brands });
   } catch (error) {
-    console.error('Erro ao buscar cadastros auxiliares:', error);
-    res.status(500).json({ error: 'Erro ao buscar cadastros auxiliares' });
+    sendError(res, error, 'Erro ao buscar cadastros auxiliares');
   }
 }

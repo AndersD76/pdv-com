@@ -1,23 +1,31 @@
 import { Request, Response } from 'express';
-import { sql } from '../database.js';
+import { sql, query, APP_TIMEZONE } from '../database.js';
 import { z } from 'zod';
+import { sendError, parseDateParam, dateString, todayInAppTimezone, addDays } from '../utils/http.js';
 
+const timeString = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Hora inválida (use HH:MM)');
+
+// Data e hora do registro são sempre as do servidor (no fuso do negócio); não vêm do cliente
 const timeClockSchema = z.object({
-  funcionario_id: z.number().optional(),
-  funcionario_nome: z.string().min(1, 'Nome do funcionário é obrigatório'),
+  funcionario_id: z.number().int().positive('Selecione um funcionário'),
   tipo: z.enum(['entrada', 'saida']),
-  data: z.string().optional(),
-  hora: z.string().optional(),
-  observacao: z.string().optional()
+  observacao: z.string().max(500).optional()
+});
+
+const updateSchema = z.object({
+  data: dateString,
+  hora: timeString,
+  tipo: z.enum(['entrada', 'saida']),
+  observacao: z.string().max(500).optional()
 });
 
 const workScheduleSchema = z.object({
-  seg_sex_entrada: z.string(),
-  seg_sex_saida: z.string(),
-  intervalo_inicio: z.string().optional(),
-  intervalo_fim: z.string().optional(),
-  sabado_entrada: z.string().optional().nullable(),
-  sabado_saida: z.string().optional().nullable(),
+  seg_sex_entrada: timeString,
+  seg_sex_saida: timeString,
+  intervalo_inicio: timeString.optional().or(z.literal('')),
+  intervalo_fim: timeString.optional().or(z.literal('')),
+  sabado_entrada: timeString.optional().nullable().or(z.literal('')),
+  sabado_saida: timeString.optional().nullable().or(z.literal('')),
   carga_horaria_diaria: z.number().int().min(1).max(12),
   tolerancia_minutos: z.number().int().min(0).max(30)
 });
@@ -27,68 +35,60 @@ export async function registrar(req: Request, res: Response) {
   try {
     const data = timeClockSchema.parse(req.body);
 
-    const agora = new Date();
-    const dataRegistro = data.data || agora.toISOString().split('T')[0];
-    const horaRegistro = data.hora || agora.toLocaleTimeString('pt-BR', { hour12: false });
-
     const [registro] = await sql`
       INSERT INTO time_clock (funcionario_id, funcionario_nome, data, hora, tipo, observacao)
-      VALUES (${data.funcionario_id || null}, ${data.funcionario_nome}, ${dataRegistro}, ${horaRegistro}, ${data.tipo}, ${data.observacao || null})
+      SELECT e.id, e.nome,
+        (now() AT TIME ZONE ${APP_TIMEZONE})::date,
+        (now() AT TIME ZONE ${APP_TIMEZONE})::time(0),
+        ${data.tipo}, ${data.observacao || null}
+      FROM employees e
+      WHERE e.id = ${data.funcionario_id} AND e.status = 'ativo'
       RETURNING *
     `;
 
+    if (!registro) {
+      return res.status(400).json({ error: 'Funcionário não encontrado ou inativo' });
+    }
+
     res.status(201).json(registro);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao registrar ponto:', error);
-    res.status(500).json({ error: 'Erro ao registrar ponto' });
+    sendError(res, error, 'Erro ao registrar ponto');
   }
 }
 
-// Listar registros de ponto
+// Listar registros de ponto (filtros podem ser combinados)
 export async function getAll(req: Request, res: Response) {
   try {
-    const { data_inicio, data_fim, funcionario_id, tipo } = req.query;
+    const dataInicio = parseDateParam(req.query.data_inicio, 'data_inicio') || addDays(todayInAppTimezone(), -7);
+    const dataFim = parseDateParam(req.query.data_fim, 'data_fim');
+    const { funcionario_id, tipo } = req.query;
 
-    let registros;
+    const params: unknown[] = [dataInicio];
+    let where = 'data >= $1::date';
 
-    if (data_inicio && data_fim) {
-      if (funcionario_id) {
-        registros = await sql`
-          SELECT * FROM time_clock
-          WHERE data >= ${data_inicio} AND data <= ${data_fim}
-          AND funcionario_id = ${funcionario_id}
-          ORDER BY data DESC, hora DESC
-        `;
-      } else if (tipo && tipo !== 'todos') {
-        registros = await sql`
-          SELECT * FROM time_clock
-          WHERE data >= ${data_inicio} AND data <= ${data_fim}
-          AND tipo = ${tipo}
-          ORDER BY data DESC, hora DESC
-        `;
-      } else {
-        registros = await sql`
-          SELECT * FROM time_clock
-          WHERE data >= ${data_inicio} AND data <= ${data_fim}
-          ORDER BY data DESC, hora DESC
-        `;
-      }
-    } else {
-      // Últimos 7 dias por padrão
-      registros = await sql`
-        SELECT * FROM time_clock
-        WHERE data >= CURRENT_DATE - INTERVAL '7 days'
-        ORDER BY data DESC, hora DESC
-      `;
+    if (dataFim) {
+      params.push(dataFim);
+      where += ` AND data <= $${params.length}::date`;
     }
+
+    if (funcionario_id) {
+      params.push(Number(funcionario_id));
+      where += ` AND funcionario_id = $${params.length}`;
+    }
+
+    if (tipo && tipo !== 'todos') {
+      params.push(tipo);
+      where += ` AND tipo = $${params.length}`;
+    }
+
+    const registros = await query(
+      `SELECT * FROM time_clock WHERE ${where} ORDER BY data DESC, hora DESC`,
+      params
+    );
 
     res.json(registros);
   } catch (error) {
-    console.error('Erro ao listar registros:', error);
-    res.status(500).json({ error: 'Erro ao listar registros de ponto' });
+    sendError(res, error, 'Erro ao listar registros de ponto');
   }
 }
 
@@ -104,16 +104,15 @@ export async function getById(req: Request, res: Response) {
 
     res.json(registro);
   } catch (error) {
-    console.error('Erro ao buscar registro:', error);
-    res.status(500).json({ error: 'Erro ao buscar registro' });
+    sendError(res, error, 'Erro ao buscar registro');
   }
 }
 
-// Atualizar registro de ponto
+// Atualizar registro de ponto (ajuste manual feito pelo administrador)
 export async function update(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { data, hora, tipo, observacao } = req.body;
+    const { data, hora, tipo, observacao } = updateSchema.parse(req.body);
 
     const [registro] = await sql`
       UPDATE time_clock
@@ -131,8 +130,7 @@ export async function update(req: Request, res: Response) {
 
     res.json(registro);
   } catch (error) {
-    console.error('Erro ao atualizar registro:', error);
-    res.status(500).json({ error: 'Erro ao atualizar registro' });
+    sendError(res, error, 'Erro ao atualizar registro');
   }
 }
 
@@ -149,8 +147,7 @@ export async function remove(req: Request, res: Response) {
 
     res.json({ message: 'Registro excluído com sucesso' });
   } catch (error) {
-    console.error('Erro ao excluir registro:', error);
-    res.status(500).json({ error: 'Erro ao excluir registro' });
+    sendError(res, error, 'Erro ao excluir registro');
   }
 }
 
@@ -175,8 +172,7 @@ export async function getJornada(req: Request, res: Response) {
 
     res.json(jornada);
   } catch (error) {
-    console.error('Erro ao buscar jornada:', error);
-    res.status(500).json({ error: 'Erro ao buscar configuração de jornada' });
+    sendError(res, error, 'Erro ao buscar configuração de jornada');
   }
 }
 
@@ -186,7 +182,7 @@ export async function saveJornada(req: Request, res: Response) {
     const data = workScheduleSchema.parse(req.body);
 
     // Verificar se já existe configuração
-    const [existing] = await sql`SELECT id FROM work_schedule LIMIT 1`;
+    const [existing] = await sql`SELECT id FROM work_schedule ORDER BY id LIMIT 1`;
 
     let jornada;
     if (existing) {
@@ -214,32 +210,30 @@ export async function saveJornada(req: Request, res: Response) {
 
     res.json(jornada);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao salvar jornada:', error);
-    res.status(500).json({ error: 'Erro ao salvar configuração de jornada' });
+    sendError(res, error, 'Erro ao salvar configuração de jornada');
   }
 }
 
 // Resumo do ponto (para integração com folha)
 export async function getResumo(req: Request, res: Response) {
   try {
-    const { funcionario_id, mes, ano } = req.query;
+    const funcionarioId = Number(req.query.funcionario_id);
+    const mes = Number(req.query.mes);
+    const ano = Number(req.query.ano);
 
-    if (!funcionario_id || !mes || !ano) {
+    if (!Number.isInteger(funcionarioId) || !Number.isInteger(mes) || mes < 1 || mes > 12 || !Number.isInteger(ano)) {
       return res.status(400).json({ error: 'Parâmetros funcionario_id, mes e ano são obrigatórios' });
     }
 
     const registros = await sql`
       SELECT * FROM time_clock
-      WHERE funcionario_id = ${funcionario_id}
+      WHERE funcionario_id = ${funcionarioId}
       AND EXTRACT(MONTH FROM data) = ${mes}
       AND EXTRACT(YEAR FROM data) = ${ano}
       ORDER BY data, hora
     `;
 
-    // Calcular horas trabalhadas
+    // Calcular horas trabalhadas (data vem como texto 'AAAA-MM-DD' e hora como 'HH:MM:SS')
     let totalMinutos = 0;
     const diasTrabalhados = new Set<string>();
     let ultimaEntrada: { data: string; hora: string } | null = null;
@@ -257,8 +251,8 @@ export async function getResumo(req: Request, res: Response) {
     }
 
     // Buscar carga horária diária
-    const [jornada] = await sql`SELECT carga_horaria_diaria FROM work_schedule LIMIT 1`;
-    const cargaDiaria = jornada?.carga_horaria_diaria || 8;
+    const [jornada] = await sql`SELECT carga_horaria_diaria FROM work_schedule ORDER BY id LIMIT 1`;
+    const cargaDiaria = Number(jornada?.carga_horaria_diaria) || 8;
     const horasEsperadas = diasTrabalhados.size * cargaDiaria * 60; // em minutos
 
     const horasExtras = Math.max(0, totalMinutos - horasEsperadas);
@@ -273,7 +267,6 @@ export async function getResumo(req: Request, res: Response) {
       registros: registros.length
     });
   } catch (error) {
-    console.error('Erro ao gerar resumo:', error);
-    res.status(500).json({ error: 'Erro ao gerar resumo do ponto' });
+    sendError(res, error, 'Erro ao gerar resumo do ponto');
   }
 }

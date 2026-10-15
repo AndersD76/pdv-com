@@ -1,12 +1,20 @@
 import { Request, Response } from 'express';
-import { sql, query } from '../database.js';
+import { sql, query, withTransaction } from '../database.js';
 import { z } from 'zod';
+import { HttpError, sendError, parseDateParam, dateString, round2 } from '../utils/http.js';
 
 const listSchema = z.object({
   fornecedor_id: z.number().positive('Fornecedor é obrigatório'),
-  data_recebimento: z.string(),
-  prazo_retirada: z.string(),
+  data_recebimento: dateString,
+  prazo_retirada: dateString,
   observacoes: z.string().optional()
+}).refine((data) => data.prazo_retirada >= data.data_recebimento, {
+  message: 'O prazo de retirada não pode ser anterior ao recebimento',
+  path: ['prazo_retirada']
+});
+
+const statusSchema = z.object({
+  status: z.enum(['DIGITADA', 'EXPORTADA', 'FINALIZADA'])
 });
 
 const productSchema = z.object({
@@ -17,24 +25,15 @@ const productSchema = z.object({
   condicao: z.enum(['NOVA', 'SEMI_NOVA', 'USADA']).default('SEMI_NOVA'),
   defeitos: z.string().optional(),
   valor_compra: z.number().positive('Valor de compra é obrigatório'),
-  valor_venda: z.number().positive('Valor de venda é obrigatório')
+  valor_venda: z.number().positive('Valor de venda é obrigatório'),
+  // Onde a peça é vendida: loja física ou loja digital (vitrine online / Instagram)
+  canal: z.enum(['FISICA', 'DIGITAL']).default('FISICA'),
+  titulo_loja: z.string().max(150).optional(),
+  descricao_loja: z.string().max(5000).optional()
 });
 
-// Gerar próximo código de lista
-async function getNextListCode(): Promise<string> {
-  const [result] = await sql`
-    SELECT codigo FROM consignment_lists
-    ORDER BY id DESC LIMIT 1
-  `;
-
-  if (!result) {
-    return 'L0001';
-  }
-
-  const lastNumber = parseInt(result.codigo.replace('L', ''));
-  const nextNumber = lastNumber + 1;
-  return `L${nextNumber.toString().padStart(4, '0')}`;
-}
+// O número da peça tem 4 dígitos no código de barras
+const MAX_ITEMS_PER_LIST = 9999;
 
 // Gerar código de barras para produto
 function generateBarcode(listCode: string, itemNumber: number): string {
@@ -56,7 +55,7 @@ export async function getAll(req: Request, res: Response) {
         (SELECT COUNT(*) FROM products WHERE lista_id = cl.id AND status = 'VENDIDO') as pecas_vendidas,
         (SELECT COUNT(*) FROM products WHERE lista_id = cl.id AND status = 'DEVOLVIDO') as pecas_devolvidas,
         (SELECT COALESCE(SUM(valor_venda), 0) FROM products WHERE lista_id = cl.id) as valor_total,
-        (SELECT COALESCE(SUM(valor_compra), 0) FROM products WHERE lista_id = cl.id AND status = 'VENDIDO') as valor_a_pagar,
+        (SELECT COALESCE(SUM(valor_compra), 0) FROM products WHERE lista_id = cl.id AND status = 'VENDIDO' AND NOT pago_fornecedor) as valor_a_pagar,
         (SELECT COALESCE(SUM(valor_venda), 0) FROM products WHERE lista_id = cl.id AND status = 'VENDIDO') as valor_vendido
       FROM consignment_lists cl
       JOIN suppliers s ON s.id = cl.fornecedor_id
@@ -71,7 +70,7 @@ export async function getAll(req: Request, res: Response) {
     }
 
     if (fornecedor_id) {
-      params.push(fornecedor_id);
+      params.push(Number(fornecedor_id));
       queryStr += ` AND cl.fornecedor_id = $${params.length}`;
     }
 
@@ -85,12 +84,11 @@ export async function getAll(req: Request, res: Response) {
     const lists = await query(queryStr, params);
     res.json(lists);
   } catch (error) {
-    console.error('Erro ao listar consignações:', error);
-    res.status(500).json({ error: 'Erro ao listar consignações' });
+    sendError(res, error, 'Erro ao listar consignações');
   }
 }
 
-// Buscar lista por ID com produtos
+// Buscar lista por ID com produtos e pagamentos
 export async function getById(req: Request, res: Response) {
   try {
     const { id } = req.params;
@@ -108,13 +106,24 @@ export async function getById(req: Request, res: Response) {
     }
 
     const products = await sql`
-      SELECT * FROM products WHERE lista_id = ${id} ORDER BY id
+      SELECT p.*, pp.updated_at as foto_atualizada_em
+      FROM products p
+      LEFT JOIN product_photos pp ON pp.product_id = p.id
+      WHERE p.lista_id = ${id}
+      ORDER BY p.id
     `;
 
-    res.json({ ...list, products });
+    const payments = await sql`
+      SELECT sp.*, u.nome as usuario_nome
+      FROM supplier_payments sp
+      LEFT JOIN users u ON u.id = sp.usuario_id
+      WHERE sp.lista_id = ${id}
+      ORDER BY sp.created_at DESC
+    `;
+
+    res.json({ ...list, products, payments });
   } catch (error) {
-    console.error('Erro ao buscar lista:', error);
-    res.status(500).json({ error: 'Erro ao buscar lista' });
+    sendError(res, error, 'Erro ao buscar lista');
   }
 }
 
@@ -122,21 +131,17 @@ export async function getById(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   try {
     const data = listSchema.parse(req.body);
-    const codigo = await getNextListCode();
 
     const [list] = await sql`
       INSERT INTO consignment_lists (codigo, fornecedor_id, data_recebimento, prazo_retirada, observacoes)
-      VALUES (${codigo}, ${data.fornecedor_id}, ${data.data_recebimento}, ${data.prazo_retirada}, ${data.observacoes || null})
+      VALUES ('L' || LPAD(nextval('consignment_lists_codigo_seq')::text, 4, '0'), ${data.fornecedor_id},
+        ${data.data_recebimento}, ${data.prazo_retirada}, ${data.observacoes || null})
       RETURNING *
     `;
 
     res.status(201).json(list);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar lista:', error);
-    res.status(500).json({ error: 'Erro ao criar lista' });
+    sendError(res, error, 'Erro ao criar lista');
   }
 }
 
@@ -163,11 +168,7 @@ export async function update(req: Request, res: Response) {
 
     res.json(list);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao atualizar lista:', error);
-    res.status(500).json({ error: 'Erro ao atualizar lista' });
+    sendError(res, error, 'Erro ao atualizar lista');
   }
 }
 
@@ -175,11 +176,7 @@ export async function update(req: Request, res: Response) {
 export async function updateStatus(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-
-    if (!['DIGITADA', 'EXPORTADA', 'FINALIZADA'].includes(status)) {
-      return res.status(400).json({ error: 'Status inválido' });
-    }
+    const { status } = statusSchema.parse(req.body);
 
     // Se for finalizar, verificar se todas as peças foram resolvidas
     if (status === 'FINALIZADA') {
@@ -204,8 +201,7 @@ export async function updateStatus(req: Request, res: Response) {
 
     res.json(list);
   } catch (error) {
-    console.error('Erro ao atualizar status:', error);
-    res.status(500).json({ error: 'Erro ao atualizar status' });
+    sendError(res, error, 'Erro ao atualizar status');
   }
 }
 
@@ -214,65 +210,75 @@ export async function remove(req: Request, res: Response) {
   try {
     const { id } = req.params;
 
-    // Verificar se tem produtos vendidos
-    const [soldProducts] = await sql`
-      SELECT COUNT(*) as count FROM products WHERE lista_id = ${id} AND status = 'VENDIDO'
+    // Peças que passaram por alguma venda (mesmo cancelada) mantêm o histórico
+    const [withHistory] = await sql`
+      SELECT COUNT(*) as count
+      FROM products p
+      WHERE p.lista_id = ${id}
+        AND (p.status = 'VENDIDO' OR EXISTS (SELECT 1 FROM sale_items si WHERE si.produto_id = p.id))
     `;
-    if (soldProducts && Number(soldProducts.count) > 0) {
-      return res.status(400).json({ error: 'Não é possível excluir lista com produtos vendidos' });
+    if (withHistory && Number(withHistory.count) > 0) {
+      return res.status(400).json({ error: 'Não é possível excluir lista com produtos vendidos ou com histórico de vendas' });
     }
 
-    // Excluir produtos da lista primeiro
-    await sql`DELETE FROM products WHERE lista_id = ${id}`;
+    // Excluir produtos e lista na mesma transação
+    const [, deleted] = await sql.transaction([
+      sql`DELETE FROM products WHERE lista_id = ${id}`,
+      sql`DELETE FROM consignment_lists WHERE id = ${id} RETURNING id`
+    ]) as Array<Record<string, unknown>[]>;
 
-    const [list] = await sql`DELETE FROM consignment_lists WHERE id = ${id} RETURNING *`;
-
-    if (!list) {
+    if (deleted.length === 0) {
       return res.status(404).json({ error: 'Lista não encontrada' });
     }
 
     res.json({ message: 'Lista excluída com sucesso' });
   } catch (error) {
-    console.error('Erro ao excluir lista:', error);
-    res.status(500).json({ error: 'Erro ao excluir lista' });
+    sendError(res, error, 'Erro ao excluir lista');
   }
 }
 
 // Adicionar produto à lista
 export async function addProduct(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     const data = productSchema.parse(req.body);
 
-    // Buscar lista
-    const [list] = await sql`SELECT * FROM consignment_lists WHERE id = ${id}`;
-    if (!list) {
-      return res.status(404).json({ error: 'Lista não encontrada' });
-    }
+    const product = await withTransaction(async (tx) => {
+      // Contador por lista: o número da peça nunca se repete, mesmo após remover peças
+      const list = await tx.queryOne<{ codigo: string; ultimo_item: number }>(
+        `UPDATE consignment_lists SET ultimo_item = ultimo_item + 1
+         WHERE id = $1 AND status <> 'FINALIZADA'
+         RETURNING codigo, ultimo_item`,
+        [id]
+      );
 
-    if (list.status === 'FINALIZADA') {
-      return res.status(400).json({ error: 'Não é possível adicionar produtos a uma lista finalizada' });
-    }
+      if (!list) {
+        const exists = await tx.queryOne('SELECT 1 FROM consignment_lists WHERE id = $1', [id]);
+        throw exists
+          ? new HttpError(400, 'Não é possível adicionar produtos a uma lista finalizada')
+          : new HttpError(404, 'Lista não encontrada');
+      }
 
-    // Contar produtos existentes para gerar código
-    const [countResult] = await sql`SELECT COUNT(*) as count FROM products WHERE lista_id = ${id}`;
-    const itemNumber = Number(countResult?.count || 0) + 1;
-    const codigoBarras = generateBarcode(list.codigo, itemNumber);
+      if (list.ultimo_item > MAX_ITEMS_PER_LIST) {
+        throw new HttpError(400, `Limite de ${MAX_ITEMS_PER_LIST} peças por lista atingido. Crie uma nova lista.`);
+      }
 
-    const [product] = await sql`
-      INSERT INTO products (codigo_barras, descricao, cor, marca, tamanho, condicao, defeitos, valor_compra, valor_venda, lista_id)
-      VALUES (${codigoBarras}, ${data.descricao}, ${data.cor || null}, ${data.marca || null}, ${data.tamanho || null},
-        ${data.condicao}, ${data.defeitos || null}, ${data.valor_compra}, ${data.valor_venda}, ${id})
-      RETURNING *
-    `;
+      return tx.queryOne(
+        `INSERT INTO products (codigo_barras, descricao, cor, marca, tamanho, condicao, defeitos, valor_compra, valor_venda, lista_id,
+           canal, titulo_loja, descricao_loja)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING *`,
+        [
+          generateBarcode(list.codigo, list.ultimo_item), data.descricao, data.cor || null, data.marca || null,
+          data.tamanho || null, data.condicao, data.defeitos || null, data.valor_compra, data.valor_venda, id,
+          data.canal, data.titulo_loja || null, data.descricao_loja || null
+        ]
+      );
+    });
 
     res.status(201).json(product);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao adicionar produto:', error);
-    res.status(500).json({ error: 'Erro ao adicionar produto' });
+    sendError(res, error, 'Erro ao adicionar produto');
   }
 }
 
@@ -298,10 +304,7 @@ export async function updateProduct(req: Request, res: Response) {
       return res.status(400).json({ error: 'Não é possível editar produtos de uma lista finalizada' });
     }
 
-    if (existingProduct.status === 'VENDIDO') {
-      return res.status(400).json({ error: 'Não é possível editar produto já vendido' });
-    }
-
+    // Condição no próprio UPDATE evita editar uma peça vendida entre a checagem e a gravação
     const [product] = await sql`
       UPDATE products
       SET descricao = ${data.descricao},
@@ -312,18 +315,21 @@ export async function updateProduct(req: Request, res: Response) {
           defeitos = ${data.defeitos || null},
           valor_compra = ${data.valor_compra},
           valor_venda = ${data.valor_venda},
+          canal = ${data.canal},
+          titulo_loja = ${data.titulo_loja || null},
+          descricao_loja = ${data.descricao_loja || null},
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${productId}
+      WHERE id = ${productId} AND status <> 'VENDIDO'
       RETURNING *
     `;
 
+    if (!product) {
+      return res.status(400).json({ error: 'Não é possível editar produto já vendido' });
+    }
+
     res.json(product);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao atualizar produto:', error);
-    res.status(500).json({ error: 'Erro ao atualizar produto' });
+    sendError(res, error, 'Erro ao atualizar produto');
   }
 }
 
@@ -333,7 +339,8 @@ export async function removeProduct(req: Request, res: Response) {
     const { id, productId } = req.params;
 
     const [product] = await sql`
-      SELECT p.*, cl.status as lista_status
+      SELECT p.*, cl.status as lista_status,
+        EXISTS (SELECT 1 FROM sale_items si WHERE si.produto_id = p.id) as tem_historico
       FROM products p
       JOIN consignment_lists cl ON cl.id = p.lista_id
       WHERE p.id = ${productId} AND p.lista_id = ${id}
@@ -351,12 +358,18 @@ export async function removeProduct(req: Request, res: Response) {
       return res.status(400).json({ error: 'Não é possível remover produto já vendido' });
     }
 
-    await sql`DELETE FROM products WHERE id = ${productId}`;
+    if (product.tem_historico) {
+      return res.status(400).json({ error: 'Esta peça tem histórico de venda (cancelada). Use "devolver" em vez de remover.' });
+    }
+
+    const [deleted] = await sql`DELETE FROM products WHERE id = ${productId} AND status <> 'VENDIDO' RETURNING id`;
+    if (!deleted) {
+      return res.status(400).json({ error: 'Não é possível remover produto já vendido' });
+    }
 
     res.json({ message: 'Produto removido com sucesso' });
   } catch (error) {
-    console.error('Erro ao remover produto:', error);
-    res.status(500).json({ error: 'Erro ao remover produto' });
+    sendError(res, error, 'Erro ao remover produto');
   }
 }
 
@@ -365,29 +378,23 @@ export async function returnProduct(req: Request, res: Response) {
   try {
     const { productId } = req.params;
 
-    const [product] = await sql`
-      SELECT * FROM products WHERE id = ${productId}
-    `;
-
-    if (!product) {
-      return res.status(404).json({ error: 'Produto não encontrado' });
-    }
-
-    if (product.status !== 'DISPONIVEL') {
-      return res.status(400).json({ error: 'Apenas produtos disponíveis podem ser devolvidos' });
-    }
-
     const [updated] = await sql`
       UPDATE products
       SET status = 'DEVOLVIDO', updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${productId}
+      WHERE id = ${productId} AND status = 'DISPONIVEL'
       RETURNING *
     `;
 
+    if (!updated) {
+      const [product] = await sql`SELECT id FROM products WHERE id = ${productId}`;
+      return product
+        ? res.status(400).json({ error: 'Apenas produtos disponíveis podem ser devolvidos' })
+        : res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
     res.json(updated);
   } catch (error) {
-    console.error('Erro ao devolver produto:', error);
-    res.status(500).json({ error: 'Erro ao devolver produto' });
+    sendError(res, error, 'Erro ao devolver produto');
   }
 }
 
@@ -396,125 +403,155 @@ export async function returnAllProducts(req: Request, res: Response) {
   try {
     const { id } = req.params;
 
-    const result = await sql`
-      UPDATE products
-      SET status = 'DEVOLVIDO', updated_at = CURRENT_TIMESTAMP
-      WHERE lista_id = ${id} AND status = 'DISPONIVEL'
-      RETURNING *
-    ` as Record<string, unknown>[];
-
-    res.json({ message: `${result.length} produtos devolvidos` });
-  } catch (error) {
-    console.error('Erro ao devolver produtos:', error);
-    res.status(500).json({ error: 'Erro ao devolver produtos' });
-  }
-}
-
-// Marcar lista como paga
-export async function markAsPaid(req: Request, res: Response) {
-  try {
-    const { id } = req.params;
-    const { valor_pago } = req.body;
-
-    // Buscar lista
-    const [list] = await sql`SELECT * FROM consignment_lists WHERE id = ${id}`;
+    const [list] = await sql`SELECT status FROM consignment_lists WHERE id = ${id}`;
     if (!list) {
       return res.status(404).json({ error: 'Lista não encontrada' });
     }
 
-    if (list.pago) {
-      return res.status(400).json({ error: 'Esta lista já foi paga' });
-    }
+    const result = await sql`
+      UPDATE products
+      SET status = 'DEVOLVIDO', updated_at = CURRENT_TIMESTAMP
+      WHERE lista_id = ${id} AND status = 'DISPONIVEL'
+      RETURNING id
+    ` as Record<string, unknown>[];
 
-    // Calcular valor a pagar (soma do valor_compra dos produtos vendidos)
-    const [totalResult] = await sql`
-      SELECT COALESCE(SUM(valor_compra), 0) as valor_a_pagar
-      FROM products
-      WHERE lista_id = ${id} AND status = 'VENDIDO'
-    `;
-
-    const valorAPagar = Number(totalResult?.valor_a_pagar) || 0;
-    const valorPago = valor_pago !== undefined ? Number(valor_pago) : valorAPagar;
-
-    const [updated] = await sql`
-      UPDATE consignment_lists
-      SET pago = TRUE,
-          data_pagamento = CURRENT_TIMESTAMP,
-          valor_pago = ${valorPago},
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${id}
-      RETURNING *
-    `;
-
-    res.json(updated);
+    res.json({ message: `${result.length} produtos devolvidos` });
   } catch (error) {
-    console.error('Erro ao marcar lista como paga:', error);
-    res.status(500).json({ error: 'Erro ao marcar lista como paga' });
+    sendError(res, error, 'Erro ao devolver produtos');
+  }
+}
+
+// Registrar pagamento ao fornecedor: quita todas as peças vendidas e ainda não pagas da lista
+export async function markAsPaid(req: Request, res: Response) {
+  try {
+    const id = Number(req.params.id);
+
+    const payment = await withTransaction(async (tx) => {
+      const list = await tx.queryOne('SELECT id FROM consignment_lists WHERE id = $1 FOR UPDATE', [id]);
+      if (!list) {
+        throw new HttpError(404, 'Lista não encontrada');
+      }
+
+      // FOR UPDATE impede que um cancelamento de venda aconteça no meio do pagamento
+      const pending = await tx.query<{ id: number; valor_compra: number }>(
+        `SELECT id, valor_compra FROM products
+         WHERE lista_id = $1 AND status = 'VENDIDO' AND NOT pago_fornecedor
+         FOR UPDATE`,
+        [id]
+      );
+
+      if (pending.length === 0) {
+        throw new HttpError(400, 'Não há peças vendidas pendentes de pagamento nesta lista');
+      }
+
+      const valor = round2(pending.reduce((sum, p) => sum + p.valor_compra, 0));
+
+      const created = await tx.queryOne<{ id: number }>(
+        `INSERT INTO supplier_payments (lista_id, valor, quantidade_pecas, usuario_id)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [id, valor, pending.length, req.user!.id]
+      );
+
+      await tx.query(
+        'UPDATE products SET pago_fornecedor = TRUE, pagamento_id = $1 WHERE id = ANY($2::int[])',
+        [created!.id, pending.map((p) => p.id)]
+      );
+
+      // Campos acumulados na lista (total já pago e data do último pagamento)
+      await tx.query(
+        `UPDATE consignment_lists
+         SET valor_pago = COALESCE(valor_pago, 0) + $2,
+             data_pagamento = CURRENT_TIMESTAMP,
+             pago = NOT EXISTS (SELECT 1 FROM products WHERE lista_id = $1 AND status = 'DISPONIVEL'),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [id, valor]
+      );
+
+      return created;
+    });
+
+    res.json(payment);
+  } catch (error) {
+    sendError(res, error, 'Erro ao registrar pagamento');
   }
 }
 
 // Relatório de pagamentos de fornecedores
 export async function getPaymentReport(req: Request, res: Response) {
   try {
-    const { inicio, fim, pago, fornecedor_id } = req.query;
-
-    let queryStr = `
-      SELECT cl.*,
-        s.nome as fornecedor_nome,
-        s.cpf as fornecedor_cpf,
-        (SELECT COUNT(*) FROM products WHERE lista_id = cl.id AND status = 'VENDIDO') as pecas_vendidas,
-        (SELECT COALESCE(SUM(valor_compra), 0) FROM products WHERE lista_id = cl.id AND status = 'VENDIDO') as valor_a_pagar
-      FROM consignment_lists cl
-      JOIN suppliers s ON s.id = cl.fornecedor_id
-      WHERE 1=1
-    `;
+    const inicio = parseDateParam(req.query.inicio, 'inicio');
+    const fim = parseDateParam(req.query.fim, 'fim');
+    const { pago, fornecedor_id } = req.query;
 
     const params: unknown[] = [];
+    let where = 'WHERE 1=1';
 
-    if (inicio && fim) {
-      params.push(inicio, fim);
-      queryStr += ` AND cl.data_recebimento BETWEEN $${params.length - 1} AND $${params.length}`;
+    if (inicio) {
+      params.push(inicio);
+      where += ` AND cl.data_recebimento >= $${params.length}::date`;
     }
 
-    if (pago !== undefined) {
-      params.push(pago === 'true');
-      queryStr += ` AND cl.pago = $${params.length}`;
+    if (fim) {
+      params.push(fim);
+      where += ` AND cl.data_recebimento <= $${params.length}::date`;
     }
 
     if (fornecedor_id) {
-      params.push(fornecedor_id);
-      queryStr += ` AND cl.fornecedor_id = $${params.length}`;
+      params.push(Number(fornecedor_id));
+      where += ` AND cl.fornecedor_id = $${params.length}`;
     }
 
-    queryStr += ' ORDER BY cl.data_recebimento DESC';
+    const pendente = `COALESCE(SUM(p.valor_compra) FILTER (WHERE p.status = 'VENDIDO' AND NOT p.pago_fornecedor), 0)`;
+    const pagoTotal = `COALESCE(SUM(p.valor_compra) FILTER (WHERE p.status = 'VENDIDO' AND p.pago_fornecedor), 0)`;
+
+    let having = '';
+    if (pago === 'true') {
+      having = `HAVING ${pendente} = 0 AND ${pagoTotal} > 0`;
+    } else if (pago === 'false') {
+      having = `HAVING ${pendente} > 0`;
+    }
 
     const lists = await query<{
-      valor_a_pagar: string | number;
-      valor_pago: string | number;
-      pago: boolean;
+      valor_a_pagar: number;
+      valor_pago: number;
       [key: string]: unknown;
-    }>(queryStr, params);
+    }>(`
+      SELECT cl.id, cl.codigo, cl.fornecedor_id, cl.data_recebimento, cl.prazo_retirada, cl.status, cl.data_pagamento,
+        s.nome as fornecedor_nome,
+        s.cpf as fornecedor_cpf,
+        COUNT(p.id) FILTER (WHERE p.status = 'VENDIDO') as pecas_vendidas,
+        COUNT(p.id) FILTER (WHERE p.status = 'VENDIDO' AND NOT p.pago_fornecedor) as pecas_pendentes,
+        ${pendente} as valor_a_pagar,
+        ${pagoTotal} as valor_pago
+      FROM consignment_lists cl
+      JOIN suppliers s ON s.id = cl.fornecedor_id
+      LEFT JOIN products p ON p.lista_id = cl.id
+      ${where}
+      GROUP BY cl.id, s.id
+      ${having}
+      ORDER BY cl.data_recebimento DESC
+    `, params);
 
-    // Totais
-    const totalAPagar = lists.reduce((sum, l) => sum + (Number(l.valor_a_pagar) || 0), 0);
-    const totalPago = lists.filter(l => l.pago)
-      .reduce((sum, l) => sum + (Number(l.valor_pago) || 0), 0);
-    const totalPendente = lists.filter(l => !l.pago)
-      .reduce((sum, l) => sum + (Number(l.valor_a_pagar) || 0), 0);
+    // "Pago" = já houve pagamento e não há nada pendente
+    const rows = lists.map((l) => ({ ...l, pago: l.valor_a_pagar === 0 && l.valor_pago > 0 }));
+
+    const totalPago = round2(rows.reduce((sum, l) => sum + l.valor_pago, 0));
+    const totalPendente = round2(rows.reduce((sum, l) => sum + l.valor_a_pagar, 0));
 
     res.json({
-      lists,
+      lists: rows,
       totals: {
-        total_listas: lists.length,
-        listas_pagas: lists.filter(l => l.pago).length,
-        listas_pendentes: lists.filter(l => !l.pago).length,
-        total_a_pagar: totalAPagar,
+        total_listas: rows.length,
+        listas_pagas: rows.filter(l => l.pago).length,
+        listas_pendentes: rows.filter(l => l.valor_a_pagar > 0).length,
+        total_a_pagar: round2(totalPago + totalPendente),
         total_pago: totalPago,
         total_pendente: totalPendente
       }
     });
   } catch (error) {
-    console.error('Erro ao gerar relatório de pagamentos:', error);
-    res.status(500).json({ error: 'Erro ao gerar relatório de pagamentos' });
+    sendError(res, error, 'Erro ao gerar relatório de pagamentos');
   }
 }

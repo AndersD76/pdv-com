@@ -5,6 +5,7 @@ import { Plus, Search, Eye, Tags } from 'lucide-react';
 import { consignmentsApi, suppliersApi } from '../../services/api';
 import { Button, Input, Select, Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading } from '../../components/ui';
 import type { ConsignmentList, ListStatus, Supplier } from '../../types';
+import { formatDate, isPastDate } from '../../utils/format';
 
 const statusLabels: Record<ListStatus, string> = {
   DIGITADA: 'Digitada',
@@ -38,7 +39,6 @@ export default function Consignacoes() {
     queryFn: () => suppliersApi.getAll(),
   });
 
-  const formatDate = (date: string) => new Date(date).toLocaleDateString('pt-BR');
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
@@ -123,7 +123,7 @@ export default function Consignacoes() {
                   <TableCell>{list.fornecedor_nome}</TableCell>
                   <TableCell>{formatDate(list.data_recebimento)}</TableCell>
                   <TableCell>
-                    <span className={new Date(list.prazo_retirada) < new Date() ? 'text-red-600 font-medium' : ''}>
+                    <span className={isPastDate(list.prazo_retirada) && list.status !== 'FINALIZADA' ? 'text-red-600 font-medium' : ''}>
                       {formatDate(list.prazo_retirada)}
                     </span>
                   </TableCell>

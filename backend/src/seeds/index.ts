@@ -97,10 +97,11 @@ async function seed() {
 
     // Inserir vendedora padrão
     console.log('Inserindo vendedora padrão...');
+    // sellers não tem coluna única para o ON CONFLICT agir; evita duplicar a cada execução
     await sql`
       INSERT INTO sellers (nome, comissao_percentual)
-      VALUES ('Vendedora Padrão', 10.00)
-      ON CONFLICT DO NOTHING
+      SELECT 'Vendedora Padrão', 10.00
+      WHERE NOT EXISTS (SELECT 1 FROM sellers WHERE nome = 'Vendedora Padrão')
     `;
 
     console.log('Seed concluído com sucesso!');

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { sql } from '../database.js';
+import { sendError, dateString } from '../utils/http.js';
 import { z } from 'zod';
 
 const customerSchema = z.object({
@@ -11,7 +12,7 @@ const customerSchema = z.object({
   cidade: z.string().optional(),
   estado: z.string().max(2).optional(),
   cep: z.string().optional(),
-  data_nascimento: z.string().optional().nullable(),
+  data_nascimento: dateString.optional().nullable().or(z.literal('')),
   observacoes: z.string().optional()
 });
 
@@ -35,8 +36,7 @@ export async function getAll(req: Request, res: Response) {
 
     res.json(customers);
   } catch (error) {
-    console.error('Erro ao listar clientes:', error);
-    res.status(500).json({ error: 'Erro ao listar clientes' });
+    sendError(res, error, 'Erro ao listar clientes');
   }
 }
 
@@ -53,8 +53,7 @@ export async function getById(req: Request, res: Response) {
 
     res.json(customer);
   } catch (error) {
-    console.error('Erro ao buscar cliente:', error);
-    res.status(500).json({ error: 'Erro ao buscar cliente' });
+    sendError(res, error, 'Erro ao buscar cliente');
   }
 }
 
@@ -71,11 +70,7 @@ export async function create(req: Request, res: Response) {
 
     res.status(201).json(customer);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar cliente:', error);
-    res.status(500).json({ error: 'Erro ao criar cliente' });
+    sendError(res, error, 'Erro ao criar cliente');
   }
 }
 
@@ -108,11 +103,7 @@ export async function update(req: Request, res: Response) {
 
     res.json(customer);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao atualizar cliente:', error);
-    res.status(500).json({ error: 'Erro ao atualizar cliente' });
+    sendError(res, error, 'Erro ao atualizar cliente');
   }
 }
 
@@ -129,8 +120,7 @@ export async function remove(req: Request, res: Response) {
 
     res.json({ message: 'Cliente excluído com sucesso' });
   } catch (error) {
-    console.error('Erro ao excluir cliente:', error);
-    res.status(500).json({ error: 'Erro ao excluir cliente' });
+    sendError(res, error, 'Erro ao excluir cliente');
   }
 }
 
@@ -158,7 +148,6 @@ export async function getStats(req: Request, res: Response) {
       aniversariantes_mes: aniversariantes
     });
   } catch (error) {
-    console.error('Erro ao buscar estatísticas:', error);
-    res.status(500).json({ error: 'Erro ao buscar estatísticas' });
+    sendError(res, error, 'Erro ao buscar estatísticas');
   }
 }

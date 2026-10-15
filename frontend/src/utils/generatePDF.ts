@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { ConsignmentList, Product } from '../types';
+import { formatDate } from './format';
 
 const conditionLabels: Record<string, string> = {
   NOVA: 'Nova',
@@ -11,7 +12,6 @@ const conditionLabels: Record<string, string> = {
 export function generateConsignmentPDF(list: ConsignmentList, products: Product[]) {
   const doc = new jsPDF();
 
-  const formatDate = (date: string) => new Date(date).toLocaleDateString('pt-BR');
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
@@ -130,7 +130,7 @@ export function generateConsignmentPDF(list: ConsignmentList, products: Product[
   doc.text('Assinatura da Loja', 158, signY + 5, { align: 'center' });
 
   // Data
-  doc.text(`Passo Fundo, ${formatDate(new Date().toISOString())}`, 105, signY + 15, { align: 'center' });
+  doc.text(`Passo Fundo, ${new Date().toLocaleDateString('pt-BR')}`, 105, signY + 15, { align: 'center' });
 
   // Salvar
   doc.save(`Lista_${list.codigo}_${list.fornecedor_nome?.replace(/\s/g, '_') || 'fornecedor'}.pdf`);

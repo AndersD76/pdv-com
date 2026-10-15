@@ -17,6 +17,9 @@ export enum ListStatus {
   FINALIZADA = 'FINALIZADA'
 }
 
+// Onde a peça é vendida
+export type ProductChannel = 'FISICA' | 'DIGITAL';
+
 export enum PaymentMethod {
   DINHEIRO = 'DINHEIRO',
   PIX = 'PIX',
@@ -60,6 +63,11 @@ export interface Product {
   valor_compra: number;
   valor_venda: number;
   status: ProductStatus;
+  pago_fornecedor?: boolean;
+  canal: ProductChannel;
+  titulo_loja: string | null;
+  descricao_loja: string | null;
+  foto_atualizada_em?: string | null;
   lista_id: number;
   lista_codigo?: string;
   fornecedor_nome?: string;
@@ -90,9 +98,21 @@ export interface ConsignmentList {
   valor_a_pagar?: number;
   valor_vendido?: number;
   products?: Product[];
+  payments?: SupplierPayment[];
   created_at: string;
   updated_at: string;
 }
+
+export interface SupplierPayment {
+  id: number;
+  lista_id: number;
+  valor: number;
+  quantidade_pecas: number;
+  usuario_nome?: string | null;
+  created_at: string;
+}
+
+export type SaleStatus = 'CONCLUIDA' | 'CANCELADA';
 
 export interface Sale {
   id: number;
@@ -107,6 +127,9 @@ export interface Sale {
   vendedora_nome?: string;
   total_itens?: number;
   items?: SaleItem[];
+  status: SaleStatus;
+  cancelada_em?: string | null;
+  motivo_cancelamento?: string | null;
   created_at: string;
 }
 
@@ -291,13 +314,14 @@ export interface PayrollResult {
   outros_proventos: number;
   total_proventos: number;
   inss: { valor: number; aliquota_efetiva: number };
-  irrf: { valor: number; aliquota: number; faixa: string; base_calculo: number };
+  irrf: { valor: number; aliquota: number; faixa: string; base_calculo: number; reducao: number; desconto_simplificado: boolean };
   vale_transporte: { percentual: number; valor: number };
   vale_refeicao: number;
   outros_descontos: number;
   total_descontos: number;
   salario_liquido: number;
-  encargos: { fgts: number; inss_patronal: number; total: number };
+  encargos: { fgts: number; inss_patronal: number; total: number; regime_tributario: 'simples' | 'normal'; observacao: string };
+  ano_tabela: number;
 }
 
 export interface TaxSimulationResult {
@@ -308,6 +332,7 @@ export interface TaxSimulationResult {
   simples: { elegivel: boolean; aliquota_efetiva?: number; imposto_mensal?: number };
   lucro_presumido: { imposto_mensal: number; detalhamento: Record<string, number> };
   recomendacao: string;
+  avisos: string[];
 }
 
 export interface TerminationResult {
@@ -323,7 +348,54 @@ export interface TerminationResult {
     total_proventos: number;
     total_descontos: number;
     total_rescisao: number;
+    meses_13: number;
     fgts: { saldo: number; multa: number; saque_total: number };
     direito_seguro_desemprego: boolean;
+    observacoes: string[];
   };
+}
+
+// ==================== IA E LOJA ONLINE ====================
+
+export interface ProductAnalysis {
+  descricao: string;
+  cor: string | null;
+  marca: string | null;
+  tamanho: string | null;
+  condicao: ProductCondition;
+  defeitos: string | null;
+  valor_venda_sugerido: number | null;
+  titulo_loja: string;
+  descricao_loja: string;
+  observacoes: string | null;
+}
+
+export interface LojaStatus {
+  ia_configurada: boolean;
+  vitrine_url: string;
+  feed_url: string;
+  instagram: string | null;
+  whatsapp: string | null;
+  dominio_verificacao_configurado: boolean;
+  url_publica_configurada: boolean;
+  pecas_publicadas: number;
+  pecas_sem_foto: number;
+}
+
+// ==================== USUÁRIOS ====================
+
+export type UserRole = 'admin' | 'operador';
+
+export interface AuthUser {
+  id: number;
+  nome: string;
+  usuario: string;
+  perfil: UserRole;
+  deve_trocar_senha: boolean;
+}
+
+export interface AppUser extends AuthUser {
+  ativo: boolean;
+  created_at: string;
+  updated_at: string;
 }

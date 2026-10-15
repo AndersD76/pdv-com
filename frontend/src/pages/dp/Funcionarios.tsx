@@ -8,13 +8,10 @@ import {
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading
 } from '../../components/ui';
 import type { Employee } from '../../types';
+import { formatDate } from '../../utils/format';
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-};
-
-const formatDate = (date: string) => {
-  return new Date(date).toLocaleDateString('pt-BR');
 };
 
 export default function Funcionarios() {

@@ -6,13 +6,14 @@ import toast from 'react-hot-toast';
 import { consignmentsApi, suppliersApi } from '../../services/api';
 import { Button, Input, Select, Textarea, Modal, ModalFooter } from '../../components/ui';
 import type { Supplier } from '../../types';
+import { todayISO, addDaysISO } from '../../utils/format';
 
 export default function NovaConsignacao() {
   const navigate = useNavigate();
 
   const [fornecedorId, setFornecedorId] = useState('');
-  const [dataRecebimento, setDataRecebimento] = useState(new Date().toISOString().split('T')[0]);
-  const [prazoRetirada, setPrazoRetirada] = useState('');
+  const [dataRecebimento, setDataRecebimento] = useState(todayISO());
+  const [prazoRetirada, setPrazoRetirada] = useState(addDaysISO(todayISO(), 30));
   const [observacoes, setObservacoes] = useState('');
   const [showNewSupplierModal, setShowNewSupplierModal] = useState(false);
 
@@ -59,9 +60,7 @@ export default function NovaConsignacao() {
   const handleDataRecebimentoChange = (value: string) => {
     setDataRecebimento(value);
     if (value) {
-      const date = new Date(value);
-      date.setDate(date.getDate() + 30);
-      setPrazoRetirada(date.toISOString().split('T')[0]);
+      setPrazoRetirada(addDaysISO(value, 30));
     }
   };
 

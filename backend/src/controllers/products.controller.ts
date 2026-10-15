@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
 import { sql, query } from '../database.js';
+import { sendError } from '../utils/http.js';
+import { detectImageMime } from '../utils/images.js';
+
+const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 
 // Buscar produto por código de barras (usado no PDV)
 export async function getByBarcode(req: Request, res: Response) {
@@ -20,8 +24,7 @@ export async function getByBarcode(req: Request, res: Response) {
 
     res.json(product);
   } catch (error) {
-    console.error('Erro ao buscar produto:', error);
-    res.status(500).json({ error: 'Erro ao buscar produto' });
+    sendError(res, error, 'Erro ao buscar produto');
   }
 }
 
@@ -54,21 +57,22 @@ export async function searchAvailable(req: Request, res: Response) {
 
     res.json(products);
   } catch (error) {
-    console.error('Erro ao buscar produtos:', error);
-    res.status(500).json({ error: 'Erro ao buscar produtos' });
+    sendError(res, error, 'Erro ao buscar produtos');
   }
 }
 
 // Listar todos os produtos com filtros
 export async function getAll(req: Request, res: Response) {
   try {
-    const { status, lista_id, fornecedor_id, search } = req.query;
+    const { status, lista_id, fornecedor_id, search, canal } = req.query;
 
     let queryStr = `
-      SELECT p.*, cl.codigo as lista_codigo, sup.nome as fornecedor_nome
+      SELECT p.*, cl.codigo as lista_codigo, sup.nome as fornecedor_nome,
+        pp.updated_at as foto_atualizada_em
       FROM products p
       JOIN consignment_lists cl ON cl.id = p.lista_id
       JOIN suppliers sup ON sup.id = cl.fornecedor_id
+      LEFT JOIN product_photos pp ON pp.product_id = p.id
       WHERE 1=1
     `;
 
@@ -89,6 +93,11 @@ export async function getAll(req: Request, res: Response) {
       queryStr += ` AND cl.fornecedor_id = $${params.length}`;
     }
 
+    if (canal) {
+      params.push(canal);
+      queryStr += ` AND p.canal = $${params.length}`;
+    }
+
     if (search) {
       params.push(`%${search}%`);
       queryStr += ` AND (p.descricao ILIKE $${params.length} OR p.codigo_barras ILIKE $${params.length} OR p.marca ILIKE $${params.length})`;
@@ -99,8 +108,7 @@ export async function getAll(req: Request, res: Response) {
     const products = await query(queryStr, params);
     res.json(products);
   } catch (error) {
-    console.error('Erro ao listar produtos:', error);
-    res.status(500).json({ error: 'Erro ao listar produtos' });
+    sendError(res, error, 'Erro ao listar produtos');
   }
 }
 
@@ -124,8 +132,7 @@ export async function getById(req: Request, res: Response) {
 
     res.json(product);
   } catch (error) {
-    console.error('Erro ao buscar produto:', error);
-    res.status(500).json({ error: 'Erro ao buscar produto' });
+    sendError(res, error, 'Erro ao buscar produto');
   }
 }
 
@@ -154,7 +161,73 @@ export async function getLabelsData(req: Request, res: Response) {
 
     res.json({ list, products });
   } catch (error) {
-    console.error('Erro ao buscar dados para etiquetas:', error);
-    res.status(500).json({ error: 'Erro ao buscar dados' });
+    sendError(res, error, 'Erro ao buscar dados');
+  }
+}
+
+// Foto da peça (para usuários logados; a loja pública só mostra fotos de peças digitais)
+export async function getPhoto(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const [photo] = await sql`
+      SELECT mime, encode(dados, 'base64') as base64 FROM product_photos WHERE product_id = ${id}
+    `;
+
+    if (!photo) {
+      return res.status(404).json({ error: 'Peça sem foto' });
+    }
+
+    // A URL leva a data da foto (?v=), então pode ficar em cache até a foto mudar
+    res.setHeader('Cache-Control', req.query.v ? 'private, max-age=31536000, immutable' : 'private, no-cache');
+    res.type(String(photo.mime)).send(Buffer.from(String(photo.base64), 'base64'));
+  } catch (error) {
+    sendError(res, error, 'Erro ao buscar foto');
+  }
+}
+
+// Envia ou substitui a foto da peça (corpo da requisição = arquivo JPEG, PNG ou WebP)
+export async function uploadPhoto(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+
+    if (!Buffer.isBuffer(data) || data.length === 0) {
+      return res.status(400).json({ error: 'Envie a foto no corpo da requisição' });
+    }
+    if (data.length > MAX_PHOTO_BYTES) {
+      return res.status(413).json({ error: 'Foto muito grande (máximo 3 MB)' });
+    }
+
+    const mime = detectImageMime(data);
+    if (!mime) {
+      return res.status(400).json({ error: 'Formato de foto não suportado (use JPEG, PNG ou WebP)' });
+    }
+
+    const [product] = await sql`SELECT id FROM products WHERE id = ${id}`;
+    if (!product) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
+    const [photo] = await sql`
+      INSERT INTO product_photos (product_id, mime, dados, updated_at)
+      VALUES (${id}, ${mime}, decode(${data.toString('base64')}, 'base64'), CURRENT_TIMESTAMP)
+      ON CONFLICT (product_id) DO UPDATE
+        SET mime = EXCLUDED.mime, dados = EXCLUDED.dados, updated_at = CURRENT_TIMESTAMP
+      RETURNING updated_at as foto_atualizada_em
+    `;
+
+    res.json(photo);
+  } catch (error) {
+    sendError(res, error, 'Erro ao salvar foto');
+  }
+}
+
+export async function deletePhoto(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    await sql`DELETE FROM product_photos WHERE product_id = ${id}`;
+    res.json({ message: 'Foto removida' });
+  } catch (error) {
+    sendError(res, error, 'Erro ao remover foto');
   }
 }

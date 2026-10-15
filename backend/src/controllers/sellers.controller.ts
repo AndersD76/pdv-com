@@ -1,19 +1,7 @@
 import { Request, Response } from 'express';
-import { sql } from '../database.js';
+import { sql, query, APP_TIMEZONE } from '../database.js';
 import { z } from 'zod';
-
-// Helper para converter valores numéricos (Neon retorna DECIMAL como string)
-function parseNumericFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (typeof value === 'string' && !isNaN(Number(value)) && value !== '') {
-      result[key] = Number(value);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
+import { sendError, parseDateParam } from '../utils/http.js';
 
 const sellerSchema = z.object({
   nome: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
@@ -21,6 +9,10 @@ const sellerSchema = z.object({
   telefone: z.string().optional(),
   email: z.string().email('Email inválido').optional().or(z.literal('')),
   comissao_percentual: z.number().min(0).max(100).default(10)
+});
+
+const payCommissionsSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1, 'IDs das comissões são obrigatórios').max(1000)
 });
 
 // Listar todas as vendedoras
@@ -39,8 +31,7 @@ export async function getAll(req: Request, res: Response) {
 
     res.json(sellers);
   } catch (error) {
-    console.error('Erro ao listar vendedoras:', error);
-    res.status(500).json({ error: 'Erro ao listar vendedoras' });
+    sendError(res, error, 'Erro ao listar vendedoras');
   }
 }
 
@@ -56,8 +47,7 @@ export async function getById(req: Request, res: Response) {
 
     res.json(seller);
   } catch (error) {
-    console.error('Erro ao buscar vendedora:', error);
-    res.status(500).json({ error: 'Erro ao buscar vendedora' });
+    sendError(res, error, 'Erro ao buscar vendedora');
   }
 }
 
@@ -74,11 +64,7 @@ export async function create(req: Request, res: Response) {
 
     res.status(201).json(seller);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar vendedora:', error);
-    res.status(500).json({ error: 'Erro ao criar vendedora' });
+    sendError(res, error, 'Erro ao criar vendedora');
   }
 }
 
@@ -106,11 +92,7 @@ export async function update(req: Request, res: Response) {
 
     res.json(seller);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao atualizar vendedora:', error);
-    res.status(500).json({ error: 'Erro ao atualizar vendedora' });
+    sendError(res, error, 'Erro ao atualizar vendedora');
   }
 }
 
@@ -132,8 +114,7 @@ export async function toggleActive(req: Request, res: Response) {
 
     res.json(seller);
   } catch (error) {
-    console.error('Erro ao alterar status da vendedora:', error);
-    res.status(500).json({ error: 'Erro ao alterar status da vendedora' });
+    sendError(res, error, 'Erro ao alterar status da vendedora');
   }
 }
 
@@ -156,97 +137,84 @@ export async function remove(req: Request, res: Response) {
 
     res.json({ message: 'Vendedora excluída com sucesso' });
   } catch (error) {
-    console.error('Erro ao excluir vendedora:', error);
-    res.status(500).json({ error: 'Erro ao excluir vendedora' });
+    sendError(res, error, 'Erro ao excluir vendedora');
   }
 }
 
-// Relatório de comissões da vendedora
+// Relatório de comissões da vendedora (lista e totais seguem os mesmos filtros)
 export async function getCommissionReport(req: Request, res: Response) {
   try {
-    const { id } = req.params;
-    const { inicio, fim, pago } = req.query;
+    const id = Number(req.params.id);
+    const inicio = parseDateParam(req.query.inicio, 'inicio');
+    const fim = parseDateParam(req.query.fim, 'fim');
+    const { pago } = req.query;
 
     const [seller] = await sql`SELECT * FROM sellers WHERE id = ${id}`;
     if (!seller) {
       return res.status(404).json({ error: 'Vendedora não encontrada' });
     }
 
-    let commissions;
-    const fimDoDia = fim ? `${fim} 23:59:59` : null;
+    const params: unknown[] = [id];
+    let where = 'sc.vendedora_id = $1';
 
-    if (inicio && fimDoDia) {
-      if (pago !== undefined) {
-        commissions = await sql`
-          SELECT sc.*, s.codigo as venda_codigo, s.data_venda
-          FROM seller_commissions sc
-          JOIN sales s ON s.id = sc.venda_id
-          WHERE sc.vendedora_id = ${id}
-            AND s.data_venda >= ${inicio} AND s.data_venda <= ${fimDoDia}
-            AND sc.pago = ${pago === 'true'}
-          ORDER BY s.data_venda DESC
-        `;
-      } else {
-        commissions = await sql`
-          SELECT sc.*, s.codigo as venda_codigo, s.data_venda
-          FROM seller_commissions sc
-          JOIN sales s ON s.id = sc.venda_id
-          WHERE sc.vendedora_id = ${id}
-            AND s.data_venda >= ${inicio} AND s.data_venda <= ${fimDoDia}
-          ORDER BY s.data_venda DESC
-        `;
+    if (inicio || fim) {
+      params.push(APP_TIMEZONE);
+      const tz = `$${params.length}`;
+      if (inicio) {
+        params.push(inicio);
+        where += ` AND (s.data_venda AT TIME ZONE ${tz})::date >= $${params.length}::date`;
       }
-    } else {
-      commissions = await sql`
-        SELECT sc.*, s.codigo as venda_codigo, s.data_venda
-        FROM seller_commissions sc
-        JOIN sales s ON s.id = sc.venda_id
-        WHERE sc.vendedora_id = ${id}
-        ORDER BY s.data_venda DESC
-        LIMIT 100
-      `;
+      if (fim) {
+        params.push(fim);
+        where += ` AND (s.data_venda AT TIME ZONE ${tz})::date <= $${params.length}::date`;
+      }
     }
 
-    // Calcular totais
-    const [totals] = await sql`
-      SELECT
-        COALESCE(SUM(valor_comissao), 0) as total_comissao,
-        COALESCE(SUM(CASE WHEN pago = true THEN valor_comissao ELSE 0 END), 0) as total_pago,
-        COALESCE(SUM(CASE WHEN pago = false THEN valor_comissao ELSE 0 END), 0) as total_pendente,
-        COUNT(*) as total_vendas
-      FROM seller_commissions
-      WHERE vendedora_id = ${id}
-    `;
+    if (pago !== undefined) {
+      params.push(pago === 'true');
+      where += ` AND sc.pago = $${params.length}`;
+    }
 
-    res.json({
-      seller: parseNumericFields(seller as Record<string, unknown>),
-      commissions: (commissions as Record<string, unknown>[]).map((c) => parseNumericFields(c)),
-      totals: parseNumericFields(totals as Record<string, unknown>)
-    });
+    const commissions = await query(`
+      SELECT sc.*, s.codigo as venda_codigo, s.data_venda
+      FROM seller_commissions sc
+      JOIN sales s ON s.id = sc.venda_id
+      WHERE ${where}
+      ORDER BY s.data_venda DESC
+      ${inicio || fim ? '' : 'LIMIT 100'}
+    `, params);
+
+    const [totals] = await query(`
+      SELECT
+        COALESCE(SUM(sc.valor_comissao), 0) as total_comissao,
+        COALESCE(SUM(CASE WHEN sc.pago = true THEN sc.valor_comissao ELSE 0 END), 0) as total_pago,
+        COALESCE(SUM(CASE WHEN sc.pago = false THEN sc.valor_comissao ELSE 0 END), 0) as total_pendente,
+        COUNT(*) as total_vendas
+      FROM seller_commissions sc
+      JOIN sales s ON s.id = sc.venda_id
+      WHERE ${where}
+    `, params);
+
+    res.json({ seller, commissions, totals });
   } catch (error) {
-    console.error('Erro ao gerar relatório de comissões:', error);
-    res.status(500).json({ error: 'Erro ao gerar relatório de comissões' });
+    sendError(res, error, 'Erro ao gerar relatório de comissões');
   }
 }
 
 // Marcar comissões como pagas
 export async function payCommissions(req: Request, res: Response) {
   try {
-    const { ids } = req.body;
+    const { ids } = payCommissionsSchema.parse(req.body);
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: 'IDs das comissões são obrigatórios' });
-    }
-
-    await sql`
+    const updated = await sql`
       UPDATE seller_commissions
       SET pago = true, data_pagamento = CURRENT_TIMESTAMP
-      WHERE id = ANY(${ids}::int[])
+      WHERE id = ANY(${ids}::int[]) AND pago = false
+      RETURNING id
     `;
 
-    res.json({ message: 'Comissões marcadas como pagas' });
+    res.json({ message: `${updated.length} comissão(ões) marcada(s) como paga(s)`, quantidade: updated.length });
   } catch (error) {
-    console.error('Erro ao marcar comissões como pagas:', error);
-    res.status(500).json({ error: 'Erro ao marcar comissões como pagas' });
+    sendError(res, error, 'Erro ao marcar comissões como pagas');
   }
 }

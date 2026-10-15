@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { sql } from '../database.js';
+import { sendError, dateString } from '../utils/http.js';
 import { z } from 'zod';
 
 const employeeSchema = z.object({
@@ -8,7 +9,7 @@ const employeeSchema = z.object({
   cargo: z.string().min(2, 'Cargo é obrigatório'),
   departamento: z.string().optional(),
   salario_base: z.number().positive('Salário deve ser positivo'),
-  data_admissao: z.string(),
+  data_admissao: dateString,
   dependentes: z.number().int().min(0).default(0),
   status: z.enum(['ativo', 'inativo']).default('ativo'),
   email: z.string().email('Email inválido').optional().or(z.literal('')),
@@ -46,16 +47,19 @@ export async function getAll(req: Request, res: Response) {
       employees = await sql`SELECT * FROM employees ORDER BY nome`;
     }
 
-    // Converter DECIMAL para number
-    const formatted = employees.map((emp: Record<string, unknown>) => ({
-      ...emp,
-      salario_base: emp.salario_base ? parseFloat(String(emp.salario_base)) : 0
-    }));
-
-    res.json(formatted);
+    res.json(employees);
   } catch (error) {
-    console.error('Erro ao listar funcionários:', error);
-    res.status(500).json({ error: 'Erro ao listar funcionários' });
+    sendError(res, error, 'Erro ao listar funcionários');
+  }
+}
+
+// Lista resumida (id e nome) dos funcionários ativos, usada no registro de ponto
+export async function getOptions(req: Request, res: Response) {
+  try {
+    const employees = await sql`SELECT id, nome FROM employees WHERE status = 'ativo' ORDER BY nome`;
+    res.json(employees);
+  } catch (error) {
+    sendError(res, error, 'Erro ao listar funcionários');
   }
 }
 
@@ -63,23 +67,15 @@ export async function getAll(req: Request, res: Response) {
 export async function getById(req: Request, res: Response) {
   try {
     const { id } = req.params;
-    const result = await sql`SELECT * FROM employees WHERE id = ${id}` as Record<string, unknown>[];
-    const [employee] = result;
+    const [employee] = await sql`SELECT * FROM employees WHERE id = ${id}`;
 
     if (!employee) {
       return res.status(404).json({ error: 'Funcionário não encontrado' });
     }
 
-    // Converter DECIMAL para number
-    const formatted = {
-      ...employee,
-      salario_base: employee.salario_base ? parseFloat(String(employee.salario_base)) : 0
-    };
-
-    res.json(formatted);
+    res.json(employee);
   } catch (error) {
-    console.error('Erro ao buscar funcionário:', error);
-    res.status(500).json({ error: 'Erro ao buscar funcionário' });
+    sendError(res, error, 'Erro ao buscar funcionário');
   }
 }
 
@@ -96,11 +92,7 @@ export async function create(req: Request, res: Response) {
 
     res.status(201).json(employee);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao criar funcionário:', error);
-    res.status(500).json({ error: 'Erro ao criar funcionário' });
+    sendError(res, error, 'Erro ao criar funcionário');
   }
 }
 
@@ -133,11 +125,7 @@ export async function update(req: Request, res: Response) {
 
     res.json(employee);
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.errors });
-    }
-    console.error('Erro ao atualizar funcionário:', error);
-    res.status(500).json({ error: 'Erro ao atualizar funcionário' });
+    sendError(res, error, 'Erro ao atualizar funcionário');
   }
 }
 
@@ -145,6 +133,12 @@ export async function update(req: Request, res: Response) {
 export async function remove(req: Request, res: Response) {
   try {
     const { id } = req.params;
+
+    // Registros de ponto precisam ser guardados; excluir o funcionário os apagaria em cascata
+    const [hasRecords] = await sql`SELECT COUNT(*) as count FROM time_clock WHERE funcionario_id = ${id}`;
+    if (hasRecords && Number(hasRecords.count) > 0) {
+      return res.status(400).json({ error: 'Funcionário possui registros de ponto. Inative-o em vez de excluir.' });
+    }
 
     const [employee] = await sql`DELETE FROM employees WHERE id = ${id} RETURNING *`;
 
@@ -154,8 +148,7 @@ export async function remove(req: Request, res: Response) {
 
     res.json({ message: 'Funcionário excluído com sucesso' });
   } catch (error) {
-    console.error('Erro ao excluir funcionário:', error);
-    res.status(500).json({ error: 'Erro ao excluir funcionário' });
+    sendError(res, error, 'Erro ao excluir funcionário');
   }
 }
 
@@ -180,8 +173,7 @@ export async function toggleStatus(req: Request, res: Response) {
 
     res.json(employee);
   } catch (error) {
-    console.error('Erro ao alterar status:', error);
-    res.status(500).json({ error: 'Erro ao alterar status' });
+    sendError(res, error, 'Erro ao alterar status');
   }
 }
 
@@ -204,7 +196,6 @@ export async function getStats(req: Request, res: Response) {
       folha_total: parseFloat(String(stats.folha_total)) || 0
     });
   } catch (error) {
-    console.error('Erro ao buscar estatísticas:', error);
-    res.status(500).json({ error: 'Erro ao buscar estatísticas' });
+    sendError(res, error, 'Erro ao buscar estatísticas');
   }
 }

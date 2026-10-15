@@ -8,9 +8,12 @@ import {
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty, TableLoading
 } from '../../components/ui';
 import type { Supplier } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function Fornecedores() {
   const queryClient = useQueryClient();
+  // Exclusões são restritas ao administrador
+  const { isAdmin } = useAuth();
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
@@ -124,11 +127,13 @@ export default function Fornecedores() {
                       <Button variant="ghost" size="sm" onClick={() => openEdit(supplier)}>
                         <Edit2 className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        if (confirm('Excluir fornecedor?')) deleteSupplier.mutate(supplier.id);
-                      }}>
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </Button>
+                      {isAdmin && (
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          if (confirm('Excluir fornecedor?')) deleteSupplier.mutate(supplier.id);
+                        }}>
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

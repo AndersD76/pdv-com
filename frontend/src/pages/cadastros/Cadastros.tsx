@@ -4,11 +4,14 @@ import { Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { auxiliariesApi } from '../../services/api';
 import { Button, Input, Select } from '../../components/ui';
+import { useAuth } from '../../contexts/AuthContext';
 
 type Tab = 'descricoes' | 'cores' | 'tamanhos' | 'marcas';
 
 export default function Cadastros() {
   const queryClient = useQueryClient();
+  // Exclusões são restritas ao administrador
+  const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('descricoes');
   const [newItem, setNewItem] = useState('');
   const [sizeCategory, setSizeCategory] = useState('roupa');
@@ -162,12 +165,14 @@ export default function Cadastros() {
                       <span className="text-xs text-gray-500 ml-1">({item.categoria})</span>
                     )}
                   </span>
-                  <button
-                    onClick={() => handleDelete(item.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-100 rounded transition-opacity"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => handleDelete(item.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:bg-red-100 rounded transition-opacity"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
