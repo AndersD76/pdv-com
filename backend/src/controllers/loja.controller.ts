@@ -235,8 +235,8 @@ async function paginaPeca(req: Request, res: Response) {
     const settings = await getStoreSettings();
     const reservadaAte = disponivel ? await reservaAtivaAte(peca.id) : null;
     const contato = [
-      WHATSAPP && `<a class="botao whatsapp" href="https://wa.me/${WHATSAPP}?text=${encodeURIComponent(mensagem)}" rel="noopener">${checkoutAtivo(settings) ? 'Tirar dúvidas no WhatsApp' : 'Comprar pelo WhatsApp'}</a>`,
-      INSTAGRAM && `<a class="botao secundario" href="https://ig.me/m/${encodeURIComponent(INSTAGRAM)}" rel="noopener">${checkoutAtivo(settings) ? 'Falar no Instagram' : 'Comprar pelo Instagram'}</a>`
+      WHATSAPP && `<a class="botao whatsapp" href="https://wa.me/${WHATSAPP}?text=${encodeURIComponent(mensagem)}" rel="noopener">Comprar pelo WhatsApp</a>`,
+      INSTAGRAM && `<a class="botao secundario" href="https://ig.me/m/${encodeURIComponent(INSTAGRAM)}" rel="noopener">Comprar pelo Instagram</a>`
     ].filter(Boolean).join('');
 
     let botoes: string;
@@ -245,7 +245,7 @@ async function paginaPeca(req: Request, res: Response) {
     } else if (reservadaAte) {
       botoes = '<p class="vendida">Peça reservada para outro cliente que está finalizando o pagamento. Volte em alguns minutos.</p>';
     } else if (checkoutAtivo(settings)) {
-      botoes = `<a class="botao" href="${baseUrl(req)}/loja/comprar/${peca.id}">Comprar agora · Pix ou cartão</a>${contato}`;
+      botoes = `<a class="botao" href="${baseUrl(req)}/loja/comprar/${peca.id}">Comprar agora · Pix ou cartão</a>`;
     } else {
       botoes = contato || '<p class="vendida">Entre em contato com a loja para comprar</p>';
     }

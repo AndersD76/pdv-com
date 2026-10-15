@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Sparkles, Loader2, Store, Globe } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { consignmentsApi, auxiliariesApi, productsApi, aiApi, productPhotoUrl } from '../../services/api';
-import { Button, Input, Select, Textarea, Modal, ModalFooter } from '../ui';
+import { Button, Input, MoneyInput, Select, Textarea, Modal, ModalFooter } from '../ui';
 import { PhotoPicker } from './PhotoPicker';
 import { PreparedPhoto, releasePhoto } from '../../utils/image';
 import { ProductCondition } from '../../types';
@@ -267,31 +267,24 @@ export function ProductFormModal({ isOpen, listId, product, onClose, onSaved }: 
               />
             </div>
 
-            <Input
+            <MoneyInput
               label="Valor de Compra (R$) *"
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.valor_compra}
-              onChange={(e) => {
-                const valorCompra = e.target.value;
+              value={Number(form.valor_compra) || 0}
+              onChange={(valorCompra) => {
                 setForm({
                   ...form,
-                  valor_compra: valorCompra,
+                  valor_compra: valorCompra ? String(valorCompra) : '',
                   // Sugerir valor de venda como 2x o valor de compra
-                  valor_venda: form.valor_venda || String(Number(valorCompra) * 2),
+                  valor_venda: form.valor_venda || String(valorCompra * 2),
                 });
               }}
               required
             />
 
-            <Input
+            <MoneyInput
               label="Valor de Venda (R$) *"
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.valor_venda}
-              onChange={set('valor_venda')}
+              value={Number(form.valor_venda) || 0}
+              onChange={(valorVenda) => setForm({ ...form, valor_venda: valorVenda ? String(valorVenda) : '' })}
               required
             />
 

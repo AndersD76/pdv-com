@@ -3,35 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Globe, Copy, ExternalLink, CheckCircle2, AlertCircle, Sparkles, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { lojaApi } from '../../services/api';
-import { Button, Input } from '../../components/ui';
+import { Button, Input, MoneyInput } from '../../components/ui';
 import type { StoreSettings } from '../../types';
-
-// Campo de valor em reais: aceita vírgula ou ponto e não força zeros à esquerda,
-// algo que o <input type="number"> nativo faz mal com value controlado.
-const lerValor = (texto: string) => Number(texto.replace(',', '.')) || 0;
-
-function MoneyInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  const [texto, setTexto] = useState(value ? String(value).replace('.', ',') : '');
-
-  useEffect(() => {
-    setTexto((atual) => (lerValor(atual) === value ? atual : value ? String(value).replace('.', ',') : ''));
-  }, [value]);
-
-  return (
-    <Input
-      label={label}
-      type="text"
-      inputMode="decimal"
-      placeholder="0,00"
-      value={texto}
-      onChange={(e) => {
-        const bruto = e.target.value.replace(/[^\d,]/g, '');
-        setTexto(bruto);
-        onChange(lerValor(bruto));
-      }}
-    />
-  );
-}
 
 const limitarMinutos = (minutos: number) => (minutos ? Math.min(120, Math.max(10, minutos)) : 30);
 

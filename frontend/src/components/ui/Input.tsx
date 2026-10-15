@@ -1,4 +1,4 @@
-import { InputHTMLAttributes, forwardRef } from 'react';
+import { InputHTMLAttributes, forwardRef, useEffect, useState } from 'react';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -32,6 +32,39 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 );
 
 Input.displayName = 'Input';
+
+// Valor em reais: aceita vírgula ou ponto, sem o zero fixo à esquerda nem a validação
+// do <input type="number"> que bloqueia o envio quando se digita vírgula.
+const lerValor = (texto: string) => Number(texto.replace(',', '.')) || 0;
+const formatarValor = (valor: number) => (valor ? String(valor).replace('.', ',') : '');
+
+interface MoneyInputProps extends Omit<InputProps, 'value' | 'onChange' | 'type'> {
+  value: number;
+  onChange: (valor: number) => void;
+}
+
+export function MoneyInput({ value, onChange, ...props }: MoneyInputProps) {
+  const [texto, setTexto] = useState(formatarValor(value));
+
+  useEffect(() => {
+    setTexto((atual) => (lerValor(atual) === value ? atual : formatarValor(value)));
+  }, [value]);
+
+  return (
+    <Input
+      {...props}
+      type="text"
+      inputMode="decimal"
+      placeholder={props.placeholder ?? '0,00'}
+      value={texto}
+      onChange={(e) => {
+        const bruto = e.target.value.replace(/[^\d,]/g, '');
+        setTexto(bruto);
+        onChange(lerValor(bruto));
+      }}
+    />
+  );
+}
 
 // Select Component
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
