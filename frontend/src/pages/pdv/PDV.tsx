@@ -17,8 +17,14 @@ import { PaymentMethod } from '../../types';
 import type { Product, CartItem, Seller } from '../../types';
 import { formatCurrency } from '../../utils/format';
 
-// Códigos gerados pelo sistema: 4 dígitos da lista + 4 da peça
-const MIN_BARCODE_LENGTH = 8;
+// Códigos das peças têm 12 dígitos; a etiqueta EAN-13 acrescenta 1 dígito verificador
+const STORED_CODE_LENGTH = 12;
+
+const isCompleteEan13 = (code: string) => {
+  if (!/^\d{13}$/.test(code)) return false;
+  const sum = code.slice(0, 12).split('').reduce((acc, d, i) => acc + Number(d) * (i % 2 === 0 ? 1 : 3), 0);
+  return (10 - (sum % 10)) % 10 === Number(code[12]);
+};
 
 export default function PDV() {
   const queryClient = useQueryClient();
@@ -96,12 +102,16 @@ export default function PDV() {
   };
 
   // Busca automática para leitores que não enviam Enter: só com um código completo
-  // (assim quem digita à mão não recebe "não encontrado" no meio do código)
+  // (assim quem digita à mão não recebe "não encontrado" no meio do código).
+  // Leitura de etiqueta EAN-13 busca na hora; 12+ dígitos digitados esperam uma pausa.
   useEffect(() => {
     const code = barcode.trim();
-    if (!/^\d+$/.test(code) || code.length < MIN_BARCODE_LENGTH) return;
+    if (!/^\d+$/.test(code)) return;
 
-    const timer = setTimeout(() => lookupBarcode(code), 300);
+    const delay = isCompleteEan13(code) ? 150 : code.length >= STORED_CODE_LENGTH ? 1200 : null;
+    if (delay === null) return;
+
+    const timer = setTimeout(() => lookupBarcode(code), delay);
     return () => clearTimeout(timer);
   }, [barcode]);
 

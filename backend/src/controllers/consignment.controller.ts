@@ -32,27 +32,28 @@ const productSchema = z.object({
   descricao_loja: z.string().max(5000).optional()
 });
 
-// O número da peça tem 4 dígitos no código de barras
-const MAX_ITEMS_PER_LIST = 9999;
+// Códigos de barras novos têm 12 dígitos (impressos como EAN-13, como os importados, que
+// começam por 1, 2 ou 3): "8" + número da lista (5) + número da peça (6) nas listas do sistema
+const MAX_ITEMS_PER_LIST = 999999;
+const MAX_STANDARD_LIST_NUMBER = 99999;
 
-// Listas criadas pelo sistema (L0001, L0002...): código de barras = número da lista + número da peça
+// Listas criadas pelo sistema (L0001, L0002...)
 const STANDARD_LIST_CODE = /^L\d+$/;
 
 // Gerar código de barras para produto
 function generateBarcode(listCode: string, itemNumber: number): string {
-  const listNum = listCode.replace('L', '');
-  const itemNum = itemNumber.toString().padStart(4, '0');
-  return `${listNum}${itemNum}`;
+  const listNum = listCode.replace('L', '').padStart(5, '0');
+  const itemNum = itemNumber.toString().padStart(6, '0');
+  return `8${listNum}${itemNum}`;
 }
 
-// Listas importadas (código fora do padrão, ex.: LOJA001) ou com mais de 9999 peças:
-// sequência geral de 13 dígitos começando por 2 (faixa de uso interno de loja), que não
-// coincide com os códigos de 8 dígitos do sistema nem com os de 12 dígitos importados
+// Listas importadas (código fora do padrão, ex.: LOJA001) ou muito grandes:
+// sequência geral "9" + 11 dígitos, que não coincide com os códigos importados nem com os das listas
 async function nextGlobalBarcode(tx: Tx): Promise<string> {
   for (let tentativa = 0; tentativa < 5; tentativa++) {
     const row = await tx.queryOne<{ codigo: string; existe: boolean }>(
       `SELECT c.codigo, EXISTS (SELECT 1 FROM products WHERE codigo_barras = c.codigo) AS existe
-       FROM (SELECT '2' || LPAD(nextval('products_codigo_barras_seq')::text, 12, '0') AS codigo) c`
+       FROM (SELECT '9' || LPAD(nextval('products_codigo_barras_seq')::text, 11, '0') AS codigo) c`
     );
     if (row && !row.existe) return row.codigo;
   }
@@ -274,7 +275,9 @@ export async function addProduct(req: Request, res: Response) {
       }
 
       let barcode: string;
-      if (STANDARD_LIST_CODE.test(list.codigo) && list.ultimo_item < MAX_ITEMS_PER_LIST) {
+      const standard = STANDARD_LIST_CODE.test(list.codigo)
+        && Number(list.codigo.slice(1)) <= MAX_STANDARD_LIST_NUMBER;
+      if (standard && list.ultimo_item < MAX_ITEMS_PER_LIST) {
         // Contador por lista: o número da peça nunca se repete, mesmo após remover peças
         const updated = await tx.queryOne<{ ultimo_item: number }>(
           'UPDATE consignment_lists SET ultimo_item = ultimo_item + 1 WHERE id = $1 RETURNING ultimo_item',

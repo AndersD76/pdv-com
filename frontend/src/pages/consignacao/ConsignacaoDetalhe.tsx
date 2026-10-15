@@ -3,11 +3,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Plus, Trash2, Edit2, Tags, FileText, RotateCcw,
-  Check, Download, Wallet, Globe, ImageOff
+  Check, Download, Wallet, Globe, ImageOff, Printer
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { consignmentsApi, productPhotoUrl } from '../../services/api';
 import { generateConsignmentPDF } from '../../utils/generatePDF';
+import { printLabels } from '../../utils/labels';
 import {
   Button,
   Table, TableHead, TableBody, TableRow, TableHeader, TableCell, TableEmpty
@@ -307,6 +308,9 @@ export default function ConsignacaoDetalhe() {
                   <TableCell>
                     {product.status === 'DISPONIVEL' && list.status !== 'FINALIZADA' && (
                       <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => printLabels([product])} title="Imprimir etiqueta">
+                          <Printer className="w-4 h-4" />
+                        </Button>
                         <Button variant="ghost" size="sm" onClick={() => openEditModal(product)}>
                           <Edit2 className="w-4 h-4" />
                         </Button>

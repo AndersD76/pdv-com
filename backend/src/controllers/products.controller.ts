@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
-import { sql, query } from '../database.js';
-import { sendError } from '../utils/http.js';
+import { sql, query, APP_TIMEZONE } from '../database.js';
+import { sendError, parseDateParam } from '../utils/http.js';
 import { detectImageMime } from '../utils/images.js';
+import { ean13ToStoredCode } from '../utils/barcode.js';
 
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 
@@ -9,13 +10,17 @@ const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 export async function getByBarcode(req: Request, res: Response) {
   try {
     const { codigo } = req.params;
+    // A etiqueta EAN-13 tem o dígito verificador a mais; o cadastro guarda os 12 dígitos de dados
+    const semVerificador = ean13ToStoredCode(codigo);
 
     const [product] = await sql`
       SELECT p.*, cl.codigo as lista_codigo, sup.nome as fornecedor_nome
       FROM products p
       JOIN consignment_lists cl ON cl.id = p.lista_id
       JOIN suppliers sup ON sup.id = cl.fornecedor_id
-      WHERE p.codigo_barras = ${codigo}
+      WHERE p.codigo_barras = ${codigo} OR p.codigo_barras = ${semVerificador}
+      ORDER BY (p.codigo_barras = ${codigo}) DESC
+      LIMIT 1
     `;
 
     if (!product) {
@@ -65,6 +70,7 @@ export async function searchAvailable(req: Request, res: Response) {
 export async function getAll(req: Request, res: Response) {
   try {
     const { status, lista_id, fornecedor_id, search, canal } = req.query;
+    const criadoDesde = parseDateParam(req.query.criado_desde, 'criado_desde');
 
     let queryStr = `
       SELECT p.*, cl.codigo as lista_codigo, sup.nome as fornecedor_nome,
@@ -96,6 +102,13 @@ export async function getAll(req: Request, res: Response) {
     if (canal) {
       params.push(canal);
       queryStr += ` AND p.canal = $${params.length}`;
+    }
+
+    // Peças cadastradas a partir de uma data (no fuso do negócio), ex.: etiquetas do dia
+    if (criadoDesde) {
+      params.push(APP_TIMEZONE);
+      params.push(criadoDesde);
+      queryStr += ` AND (p.created_at AT TIME ZONE $${params.length - 1})::date >= $${params.length}::date`;
     }
 
     if (search) {

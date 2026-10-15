@@ -170,7 +170,7 @@ export const consignmentsApi = {
 
 // ==================== PRODUTOS ====================
 export const productsApi = {
-  getAll: (params?: { status?: string; lista_id?: number; fornecedor_id?: number; search?: string; canal?: ProductChannel }) =>
+  getAll: (params?: { status?: string; lista_id?: number; fornecedor_id?: number; search?: string; canal?: ProductChannel; criado_desde?: string }) =>
     api.get<Product[]>('/products', { params }).then(res => res.data),
   getById: (id: number) =>
     api.get<Product>(`/products/${id}`).then(res => res.data),

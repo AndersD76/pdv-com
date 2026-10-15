@@ -59,6 +59,12 @@ function descricaoPeca(peca: PecaLoja): string {
   return partes.join(' ');
 }
 
+function infoPeca(peca: PecaLoja): string {
+  const marca = peca.marca && !/^sem marca/i.test(peca.marca.trim()) ? peca.marca : null;
+  return [peca.tamanho ? `Tam. ${peca.tamanho}` : null, marca, condicaoLabels[peca.condicao]]
+    .filter(Boolean).join(' · ');
+}
+
 function fotoUrl(req: Request, peca: PecaLoja): string {
   return `${baseUrl(req)}/loja/foto/${peca.id}?v=${new Date(peca.foto_atualizada_em).getTime()}`;
 }
@@ -96,10 +102,21 @@ ${meta}
   .botao.whatsapp { background: #16a34a; }
   .vendida { padding: 14px; border-radius: 10px; background: #f3f4f6; text-align: center; font-weight: 600; color: var(--suave); }
   .vazio { text-align: center; color: var(--suave); padding: 48px 0; }
+  header .insta { display: block; margin-top: 4px; font-size: .9rem; color: var(--cor); text-decoration: none; }
+  .filtros { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .filtros input, .filtros select { padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 10px; font-size: .95rem; background: #fff; }
+  .filtros input { flex: 1 1 180px; }
+  .filtros button { padding: 10px 16px; border: 0; border-radius: 10px; background: var(--cor); color: #fff; font-weight: 600; }
+  .filtros a { align-self: center; color: var(--suave); font-size: .9rem; }
+  .card .info { display: block; color: var(--suave); font-size: .8rem; margin-bottom: 4px; }
+  .total { color: var(--suave); font-size: .9rem; margin: 0 0 12px; }
 </style>
 </head>
 <body>
-<header><a href="${baseUrl(req)}/loja">${escapeHtml(LOJA_NOME)}</a></header>
+<header>
+  <a href="${baseUrl(req)}/loja">${escapeHtml(LOJA_NOME)}</a>
+  ${INSTAGRAM ? `<a class="insta" href="https://instagram.com/${encodeURIComponent(INSTAGRAM)}" rel="noopener">@${escapeHtml(INSTAGRAM)}</a>` : ''}
+</header>
 <main>${content}</main>
 </body>
 </html>`;
@@ -117,29 +134,64 @@ async function buscarPecaDigital(id: string): Promise<PecaLoja | null> {
   return peca ?? null;
 }
 
-// Vitrine: peças digitais disponíveis
+// Vitrine: peças digitais disponíveis, com filtros por tipo, tamanho e busca (formulário GET, sem JavaScript)
 async function vitrine(req: Request, res: Response) {
   try {
+    const tipo = typeof req.query.tipo === 'string' ? req.query.tipo.slice(0, 100) : '';
+    const tamanho = typeof req.query.tamanho === 'string' ? req.query.tamanho.slice(0, 20) : '';
+    const busca = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+
     const pecas = await sql`
       SELECT p.id, p.codigo_barras, p.descricao, p.titulo_loja, p.descricao_loja, p.marca, p.cor, p.tamanho,
         p.condicao, p.defeitos, p.valor_venda, p.status, pp.updated_at as foto_atualizada_em
       FROM products p
       JOIN product_photos pp ON pp.product_id = p.id
       WHERE p.canal = 'DIGITAL' AND p.status = 'DISPONIVEL'
+        AND (${tipo} = '' OR p.descricao = ${tipo})
+        AND (${tamanho} = '' OR p.tamanho = ${tamanho})
+        AND (${busca} = '' OR p.titulo_loja ILIKE ${'%' + busca + '%'} OR p.descricao ILIKE ${'%' + busca + '%'}
+             OR p.marca ILIKE ${'%' + busca + '%'} OR p.cor ILIKE ${'%' + busca + '%'})
       ORDER BY p.created_at DESC
       LIMIT 300
     ` as PecaLoja[];
 
-    const conteudo = pecas.length === 0
-      ? '<p class="vazio">Nenhuma peça disponível no momento. Volte em breve!</p>'
+    // Opções dos filtros: só tipos e tamanhos que existem entre as peças publicadas
+    const opcoes = await sql`
+      SELECT
+        ARRAY(SELECT DISTINCT p.descricao FROM products p JOIN product_photos pp ON pp.product_id = p.id
+              WHERE p.canal = 'DIGITAL' AND p.status = 'DISPONIVEL' ORDER BY 1) as tipos,
+        ARRAY(SELECT DISTINCT p.tamanho FROM products p JOIN product_photos pp ON pp.product_id = p.id
+              WHERE p.canal = 'DIGITAL' AND p.status = 'DISPONIVEL' AND p.tamanho IS NOT NULL ORDER BY 1) as tamanhos
+    ` as Array<{ tipos: string[]; tamanhos: string[] }>;
+
+    const option = (valor: string, atual: string, rotulo = valor) =>
+      `<option value="${escapeHtml(valor)}"${valor === atual ? ' selected' : ''}>${escapeHtml(rotulo)}</option>`;
+    const filtrando = Boolean(tipo || tamanho || busca);
+
+    const filtros = `
+      <form class="filtros" method="get" action="${baseUrl(req)}/loja">
+        <input type="search" name="q" value="${escapeHtml(busca)}" placeholder="Buscar peça, marca, cor...">
+        <select name="tipo">${option('', tipo, 'Todos os tipos')}${opcoes[0].tipos.map((t) => option(t, tipo)).join('')}</select>
+        <select name="tamanho">${option('', tamanho, 'Todos os tamanhos')}${opcoes[0].tamanhos.map((t) => option(t, tamanho)).join('')}</select>
+        <button type="submit">Filtrar</button>
+        ${filtrando ? `<a href="${baseUrl(req)}/loja">Limpar</a>` : ''}
+      </form>
+      <p class="total">${pecas.length} peça(s) disponível(is)</p>`;
+
+    const grade = pecas.length === 0
+      ? `<p class="vazio">${filtrando ? 'Nenhuma peça encontrada com esses filtros.' : 'Nenhuma peça disponível no momento. Volte em breve!'}</p>`
       : `<div class="grade">${pecas.map((peca) => `
           <a class="card" href="${baseUrl(req)}/loja/p/${peca.id}">
             <img src="${escapeHtml(fotoUrl(req, peca))}" alt="${escapeHtml(tituloPeca(peca))}" loading="lazy">
-            <div><h2>${escapeHtml(tituloPeca(peca))}</h2><span class="preco">${formatBRL(peca.valor_venda)}</span></div>
+            <div>
+              <h2>${escapeHtml(tituloPeca(peca))}</h2>
+              ${infoPeca(peca) ? `<span class="info">${escapeHtml(infoPeca(peca))}</span>` : ''}
+              <span class="preco">${formatBRL(peca.valor_venda)}</span>
+            </div>
           </a>`).join('')}</div>`;
 
     res.setHeader('Cache-Control', 'public, max-age=60');
-    res.send(layout(req, LOJA_NOME, conteudo));
+    res.send(layout(req, LOJA_NOME, filtros + grade));
   } catch (error) {
     console.error('Erro ao montar a vitrine:', error);
     res.status(500).send('Erro ao carregar a loja');
