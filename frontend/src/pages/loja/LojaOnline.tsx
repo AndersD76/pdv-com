@@ -6,6 +6,31 @@ import { lojaApi } from '../../services/api';
 import { Button, Input } from '../../components/ui';
 import type { StoreSettings } from '../../types';
 
+// Campo de valor em reais: aceita vírgula ou ponto e não força zeros à esquerda,
+// algo que o <input type="number"> nativo faz mal com value controlado.
+function MoneyInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  const [texto, setTexto] = useState(value ? String(value).replace('.', ',') : '');
+
+  useEffect(() => {
+    setTexto(value ? String(value).replace('.', ',') : '');
+  }, [value]);
+
+  return (
+    <Input
+      label={label}
+      type="text"
+      inputMode="decimal"
+      placeholder="0,00"
+      value={texto}
+      onChange={(e) => {
+        const bruto = e.target.value.replace(/[^\d,]/g, '');
+        setTexto(bruto);
+        onChange(Number(bruto.replace(',', '.')) || 0);
+      }}
+    />
+  );
+}
+
 // Pagamento (InfinitePay) e formas de entrega da compra online
 function CheckoutSettings() {
   const queryClient = useQueryClient();
@@ -78,14 +103,7 @@ function CheckoutSettings() {
         {form.entrega_local_ativa && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
             <Input label="Cidade atendida" value={form.entrega_local_cidade} onChange={(e) => set('entrega_local_cidade', e.target.value)} />
-            <Input
-              label="Taxa de entrega (R$)"
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.entrega_local_taxa}
-              onChange={(e) => set('entrega_local_taxa', Number(e.target.value) || 0)}
-            />
+            <MoneyInput label="Taxa de entrega (R$)" value={form.entrega_local_taxa} onChange={(v) => set('entrega_local_taxa', v)} />
           </div>
         )}
       </div>
@@ -94,13 +112,10 @@ function CheckoutSettings() {
         {check('correios_ativo', 'Envio pelos Correios (para todo o Brasil)')}
         {form.correios_ativo && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
-            <Input
+            <MoneyInput
               label="Frete fixo (R$) — deixe 0 para combinar por WhatsApp"
-              type="number"
-              step="0.01"
-              min="0"
               value={form.correios_taxa}
-              onChange={(e) => set('correios_taxa', Number(e.target.value) || 0)}
+              onChange={(v) => set('correios_taxa', v)}
             />
           </div>
         )}
