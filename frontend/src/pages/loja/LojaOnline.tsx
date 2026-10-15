@@ -8,11 +8,13 @@ import type { StoreSettings } from '../../types';
 
 // Campo de valor em reais: aceita vírgula ou ponto e não força zeros à esquerda,
 // algo que o <input type="number"> nativo faz mal com value controlado.
+const lerValor = (texto: string) => Number(texto.replace(',', '.')) || 0;
+
 function MoneyInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   const [texto, setTexto] = useState(value ? String(value).replace('.', ',') : '');
 
   useEffect(() => {
-    setTexto(value ? String(value).replace('.', ',') : '');
+    setTexto((atual) => (lerValor(atual) === value ? atual : value ? String(value).replace('.', ',') : ''));
   }, [value]);
 
   return (
@@ -25,8 +27,33 @@ function MoneyInput({ label, value, onChange }: { label: string; value: number; 
       onChange={(e) => {
         const bruto = e.target.value.replace(/[^\d,]/g, '');
         setTexto(bruto);
-        onChange(Number(bruto.replace(',', '.')) || 0);
+        onChange(lerValor(bruto));
       }}
+    />
+  );
+}
+
+const limitarMinutos = (minutos: number) => (minutos ? Math.min(120, Math.max(10, minutos)) : 30);
+
+function MinutosInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  const [texto, setTexto] = useState(String(value));
+
+  useEffect(() => {
+    setTexto((atual) => (Number(atual) === value ? atual : String(value)));
+  }, [value]);
+
+  return (
+    <Input
+      label={label}
+      type="text"
+      inputMode="numeric"
+      value={texto}
+      onChange={(e) => {
+        const digitos = e.target.value.replace(/\D/g, '').slice(0, 3);
+        setTexto(digitos);
+        onChange(Number(digitos));
+      }}
+      onBlur={() => onChange(limitarMinutos(Number(texto)))}
     />
   );
 }
@@ -66,7 +93,7 @@ function CheckoutSettings() {
       className="card p-6 space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
-        salvar.mutate(form);
+        salvar.mutate({ ...form, reserva_minutos: limitarMinutos(form.reserva_minutos) });
       }}
     >
       <div className="flex items-center justify-between">
@@ -122,13 +149,10 @@ function CheckoutSettings() {
       </div>
 
       <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Input
-          label="Reserva da peça enquanto o cliente paga (minutos)"
-          type="number"
-          min="10"
-          max="120"
+        <MinutosInput
+          label="Reserva da peça enquanto o cliente paga (minutos, de 10 a 120)"
           value={form.reserva_minutos}
-          onChange={(e) => set('reserva_minutos', Number(e.target.value) || 30)}
+          onChange={(v) => set('reserva_minutos', v)}
         />
       </div>
 
