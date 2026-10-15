@@ -7,6 +7,7 @@ import routes from './routes/index.js';
 import { initializeDatabase, testConnection } from './database.js';
 import { ensureAdminUser } from './auth.js';
 import { lojaRouter } from './controllers/loja.controller.js';
+import { checkoutRouter } from './controllers/checkout.controller.js';
 
 dotenv.config();
 
@@ -75,6 +76,8 @@ app.use('/api', (req, res) => {
 
 // Loja online pública (vitrine, páginas das peças, fotos e feed do catálogo do Instagram)
 app.use('/loja', lojaRouter);
+// Checkout (compra com pagamento pela InfinitePay)
+app.use('/loja', checkoutRouter);
 
 // Rota de health check
 app.get('/health', (req, res) => {

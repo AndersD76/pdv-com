@@ -135,6 +135,16 @@ export async function create(req: Request, res: Response) {
         throw new HttpError(409, `Produto(s) não disponível(is) para venda: ${unavailable.map(p => p.codigo_barras).join(', ')}`);
       }
 
+      // Peça reservada por um cliente que está pagando na loja online não pode ser vendida no balcão
+      const reservadas = await tx.query<{ codigo_barras: string }>(
+        `SELECT p.codigo_barras FROM online_orders o JOIN products p ON p.id = o.product_id
+         WHERE o.product_id = ANY($1::int[]) AND o.status = 'AGUARDANDO_PAGAMENTO' AND o.expira_em > now()`,
+        [productIds]
+      );
+      if (reservadas.length > 0) {
+        throw new HttpError(409, `Peça(s) reservada(s) para um pedido online em pagamento: ${reservadas.map(p => p.codigo_barras).join(', ')}`);
+      }
+
       const desconto = round2(data.desconto);
       const valorTotal = round2(products.reduce((sum, p) => sum + p.valor_venda, 0));
       const valorFinal = round2(valorTotal - desconto);

@@ -22,6 +22,7 @@ import * as customersController from '../controllers/customers.controller.js';
 // IA e loja online
 import * as aiController from '../controllers/ai.controller.js';
 import { getStatus as getLojaStatus } from '../controllers/loja.controller.js';
+import * as checkoutController from '../controllers/checkout.controller.js';
 
 const router = Router();
 
@@ -112,6 +113,13 @@ router.post('/ai/analisar-peca', express.json({ limit: '12mb' }), aiController.a
 
 // ==================== LOJA ONLINE / INSTAGRAM ====================
 router.get('/loja/status', requireAdmin, getLojaStatus);
+router.get('/loja/config', requireAdmin, checkoutController.getConfiguracaoLoja);
+router.put('/loja/config', requireAdmin, checkoutController.salvarConfiguracaoLoja);
+
+// Pedidos online (todos os perfis: a equipe separa e entrega; cancelar é só do admin)
+router.get('/pedidos', checkoutController.listarPedidos);
+router.get('/pedidos/resumo', checkoutController.resumoPedidos);
+router.patch('/pedidos/:id/status', checkoutController.atualizarStatusPedido);
 
 // ==================== VENDAS ====================
 router.get('/sales', requireAdmin, salesController.getAll);

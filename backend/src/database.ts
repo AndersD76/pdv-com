@@ -117,7 +117,7 @@ export async function withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>
 // Tabelas criadas por este sistema (usadas nas migrações)
 const APP_TABLES = [
   'users', 'suppliers', 'sellers', 'consignment_lists', 'products', 'sales', 'sale_items',
-  'seller_commissions', 'supplier_payments', 'product_photos', 'descriptions', 'colors', 'sizes', 'brands',
+  'seller_commissions', 'supplier_payments', 'product_photos', 'store_settings', 'online_orders', 'descriptions', 'colors', 'sizes', 'brands',
   'employees', 'time_clock', 'work_schedule', 'customers'
 ];
 
@@ -488,6 +488,62 @@ export async function initializeDatabase(): Promise<void> {
       updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `;
+
+  // Vendas: origem (balcão/PDV ou loja online)
+  await client`ALTER TABLE sales ADD COLUMN IF NOT EXISTS origem VARCHAR(10) NOT NULL DEFAULT 'PDV' CHECK (origem IN ('PDV', 'ONLINE'))`;
+
+  // Configurações da loja online (chave/valor, editadas pelo administrador)
+  await client`
+    CREATE TABLE IF NOT EXISTS store_settings (
+      chave VARCHAR(60) PRIMARY KEY,
+      valor TEXT,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+
+  // Pedidos da loja online (pagamento pelo checkout da InfinitePay)
+  await client`
+    CREATE TABLE IF NOT EXISTS online_orders (
+      id SERIAL PRIMARY KEY,
+      codigo VARCHAR(20) UNIQUE NOT NULL,
+      order_nsu VARCHAR(64) UNIQUE NOT NULL,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      status VARCHAR(20) NOT NULL DEFAULT 'AGUARDANDO_PAGAMENTO'
+        CHECK (status IN ('AGUARDANDO_PAGAMENTO', 'PAGO', 'SEPARADO', 'ENTREGUE', 'CANCELADO', 'PAGO_SEM_ESTOQUE')),
+      valor_produto DECIMAL(10,2) NOT NULL,
+      valor_frete DECIMAL(10,2) NOT NULL DEFAULT 0,
+      valor_total DECIMAL(10,2) NOT NULL,
+      entrega VARCHAR(20) NOT NULL CHECK (entrega IN ('RETIRADA', 'ENTREGA_LOCAL', 'CORREIOS')),
+      cliente_nome VARCHAR(255) NOT NULL,
+      cliente_telefone VARCHAR(30) NOT NULL,
+      cliente_email VARCHAR(255),
+      cep VARCHAR(9),
+      endereco VARCHAR(255),
+      numero VARCHAR(20),
+      complemento VARCHAR(100),
+      bairro VARCHAR(100),
+      cidade VARCHAR(100),
+      uf VARCHAR(2),
+      checkout_url TEXT,
+      expira_em TIMESTAMPTZ NOT NULL,
+      pago_em TIMESTAMPTZ,
+      forma_pagamento VARCHAR(20),
+      parcelas INTEGER,
+      valor_pago DECIMAL(10,2),
+      transaction_nsu VARCHAR(100),
+      invoice_slug VARCHAR(100),
+      receipt_url TEXT,
+      venda_id INTEGER REFERENCES sales(id),
+      separado_em TIMESTAMPTZ,
+      entregue_em TIMESTAMPTZ,
+      ip VARCHAR(64),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await client`CREATE INDEX IF NOT EXISTS idx_online_orders_product_id ON online_orders(product_id)`;
+  await client`CREATE INDEX IF NOT EXISTS idx_online_orders_status ON online_orders(status)`;
+  await syncCodeSequence('online_orders_codigo_seq', 'online_orders', 'P');
 
   // Códigos de venda e de lista gerados por sequência (sem corrida e sem reaproveitar códigos)
   await syncCodeSequence('sales_codigo_seq', 'sales', 'V');

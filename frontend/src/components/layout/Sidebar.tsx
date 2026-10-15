@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   LogOut,
   KeyRound,
-  Globe
+  Globe,
+  ShoppingBag
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -30,6 +31,7 @@ const menuItems = [
   { icon: ClipboardList, label: 'Consignacoes', path: '/consignacoes' },
   { icon: Package, label: 'Produtos', path: '/produtos' },
   { icon: Tags, label: 'Etiquetas', path: '/etiquetas' },
+  { icon: ShoppingBag, label: 'Pedidos Online', path: '/pedidos-online' },
   { icon: Globe, label: 'Loja Online', path: '/loja-online', adminOnly: true },
   { icon: Users, label: 'Fornecedores', path: '/fornecedores' },
   { icon: UserCheck, label: 'Vendedoras', path: '/vendedoras', adminOnly: true },

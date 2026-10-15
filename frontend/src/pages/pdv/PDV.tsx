@@ -122,6 +122,12 @@ export default function PDV() {
       return;
     }
 
+    if (product.reservado_ate) {
+      const ate = new Date(product.reservado_ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      toast.error(`Peça reservada para um pedido online em pagamento (até ${ate})`);
+      return;
+    }
+
     if (cartRef.current.some((item) => item.product.id === product.id)) {
       toast.error('Este produto já está no carrinho');
       return;

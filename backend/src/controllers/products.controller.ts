@@ -14,7 +14,9 @@ export async function getByBarcode(req: Request, res: Response) {
     const semVerificador = ean13ToStoredCode(codigo);
 
     const [product] = await sql`
-      SELECT p.*, cl.codigo as lista_codigo, sup.nome as fornecedor_nome
+      SELECT p.*, cl.codigo as lista_codigo, sup.nome as fornecedor_nome,
+        (SELECT MAX(o.expira_em) FROM online_orders o
+         WHERE o.product_id = p.id AND o.status = 'AGUARDANDO_PAGAMENTO' AND o.expira_em > now()) as reservado_ate
       FROM products p
       JOIN consignment_lists cl ON cl.id = p.lista_id
       JOIN suppliers sup ON sup.id = cl.fornecedor_id

@@ -68,6 +68,7 @@ export interface Product {
   titulo_loja: string | null;
   descricao_loja: string | null;
   foto_atualizada_em?: string | null;
+  reservado_ate?: string | null;
   lista_id: number;
   lista_codigo?: string;
   fornecedor_nome?: string;
@@ -380,6 +381,67 @@ export interface LojaStatus {
   url_publica_configurada: boolean;
   pecas_publicadas: number;
   pecas_sem_foto: number;
+  checkout_ativo: boolean;
+}
+
+export interface StoreSettings {
+  infinitepay_handle: string;
+  retirada_ativa: boolean;
+  retirada_endereco: string;
+  retirada_horario: string;
+  entrega_local_ativa: boolean;
+  entrega_local_taxa: number;
+  entrega_local_cidade: string;
+  correios_ativo: boolean;
+  correios_taxa: number;
+  reserva_minutos: number;
+  checkout_ativo?: boolean;
+}
+
+export type OnlineOrderStatus = 'AGUARDANDO_PAGAMENTO' | 'PAGO' | 'SEPARADO' | 'ENTREGUE' | 'CANCELADO' | 'PAGO_SEM_ESTOQUE';
+export type DeliveryMethod = 'RETIRADA' | 'ENTREGA_LOCAL' | 'CORREIOS';
+
+export interface OnlineOrder {
+  id: number;
+  codigo: string;
+  product_id: number;
+  status: OnlineOrderStatus;
+  expirado: boolean;
+  valor_produto: number;
+  valor_frete: number;
+  valor_total: number;
+  valor_pago: number | null;
+  entrega: DeliveryMethod;
+  cliente_nome: string;
+  cliente_telefone: string;
+  cliente_email: string | null;
+  cep: string | null;
+  endereco: string | null;
+  numero: string | null;
+  complemento: string | null;
+  bairro: string | null;
+  cidade: string | null;
+  uf: string | null;
+  forma_pagamento: string | null;
+  parcelas: number | null;
+  receipt_url: string | null;
+  pago_em: string | null;
+  separado_em: string | null;
+  entregue_em: string | null;
+  expira_em: string;
+  created_at: string;
+  codigo_barras: string;
+  descricao: string;
+  titulo_loja: string | null;
+  tamanho: string | null;
+  marca: string | null;
+  foto_atualizada_em: string | null;
+}
+
+export interface OrdersSummary {
+  para_separar: number;
+  sem_estoque: number;
+  aguardando: number;
 }
 
 // ==================== USUÁRIOS ====================

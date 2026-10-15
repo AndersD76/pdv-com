@@ -24,7 +24,10 @@ import type {
   SupplierPayment,
   ProductChannel,
   ProductAnalysis,
-  LojaStatus
+  LojaStatus,
+  StoreSettings,
+  OnlineOrder,
+  OrdersSummary
 } from '../types';
 
 const api = axios.create({
@@ -209,6 +212,17 @@ export const aiApi = {
 // ==================== LOJA ONLINE ====================
 export const lojaApi = {
   status: () => api.get<LojaStatus>('/loja/status').then(res => res.data),
+  getConfig: () => api.get<StoreSettings>('/loja/config').then(res => res.data),
+  saveConfig: (data: StoreSettings) => api.put<StoreSettings>('/loja/config', data).then(res => res.data),
+};
+
+// ==================== PEDIDOS ONLINE ====================
+export const pedidosApi = {
+  getAll: (status?: string) =>
+    api.get<OnlineOrder[]>('/pedidos', { params: { status } }).then(res => res.data),
+  resumo: () => api.get<OrdersSummary>('/pedidos/resumo').then(res => res.data),
+  updateStatus: (id: number, status: 'SEPARADO' | 'ENTREGUE' | 'CANCELADO') =>
+    api.patch<OnlineOrder>(`/pedidos/${id}/status`, { status }).then(res => res.data),
 };
 
 // ==================== VENDAS ====================

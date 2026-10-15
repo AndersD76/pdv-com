@@ -19,6 +19,7 @@ import Relatorios from './pages/relatorios/Relatorios';
 import Cadastros from './pages/cadastros/Cadastros';
 import Usuarios from './pages/cadastros/Usuarios';
 import LojaOnline from './pages/loja/LojaOnline';
+import PedidosOnline from './pages/loja/PedidosOnline';
 
 // Departamento Pessoal Pages
 import Funcionarios from './pages/dp/Funcionarios';
@@ -61,6 +62,7 @@ function App() {
         <Route path="/cadastros" element={page(<Cadastros />)} />
         <Route path="/usuarios" element={page(<Usuarios />, { admin: true })} />
         <Route path="/loja-online" element={page(<LojaOnline />, { admin: true })} />
+        <Route path="/pedidos-online" element={page(<PedidosOnline />)} />
 
         {/* Departamento Pessoal */}
         <Route path="/funcionarios" element={page(<Funcionarios />, { admin: true })} />

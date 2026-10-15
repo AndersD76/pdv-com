@@ -1,14 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { sql } from '../database.js';
 import { isAiConfigured } from '../services/productAi.js';
+import { getStoreSettings, checkoutAtivo } from '../services/storeSettings.js';
+import { reservaAtivaAte } from '../services/reservas.js';
 import { sendError } from '../utils/http.js';
 
 // Loja online pública: vitrine, página de cada peça, fotos e feed do catálogo do Instagram (Meta Commerce Manager).
 // Só aparecem peças com canal DIGITAL e foto cadastrada.
 
-const LOJA_NOME = process.env.LOJA_NOME || 'Apega Desapega Brechó';
-const INSTAGRAM = (process.env.LOJA_INSTAGRAM || '').replace(/^@/, '').trim();
-const WHATSAPP = (process.env.LOJA_WHATSAPP || '').replace(/\D/g, '');
+export const LOJA_NOME = process.env.LOJA_NOME || 'Apega Desapega Brechó';
+export const INSTAGRAM = (process.env.LOJA_INSTAGRAM || '').replace(/^@/, '').trim();
+export const WHATSAPP = (process.env.LOJA_WHATSAPP || '').replace(/\D/g, '');
 const DOMAIN_VERIFICATION = process.env.FACEBOOK_DOMAIN_VERIFICATION || '';
 
 // Peças vendidas/devolvidas continuam no feed como "fora de estoque" por este período, para o Instagram removê-las
@@ -16,7 +18,7 @@ const DIAS_NO_FEED_APOS_SAIR = 30;
 
 const condicaoLabels: Record<string, string> = { NOVA: 'Nova', SEMI_NOVA: 'Seminova', USADA: 'Usada' };
 
-interface PecaLoja {
+export interface PecaLoja {
   id: number;
   codigo_barras: string;
   descricao: string;
@@ -32,11 +34,11 @@ interface PecaLoja {
   foto_atualizada_em: Date;
 }
 
-function baseUrl(req: Request): string {
+export function baseUrl(req: Request): string {
   return (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
 }
 
-function escapeHtml(value: unknown): string {
+export function escapeHtml(value: unknown): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -45,10 +47,10 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-const formatBRL = (value: number) =>
+export const formatBRL = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
 
-function tituloPeca(peca: PecaLoja): string {
+export function tituloPeca(peca: PecaLoja): string {
   return peca.titulo_loja
     || [peca.descricao, peca.marca, peca.tamanho ? `Tam. ${peca.tamanho}` : null].filter(Boolean).join(' - ');
 }
@@ -65,11 +67,11 @@ function infoPeca(peca: PecaLoja): string {
     .filter(Boolean).join(' · ');
 }
 
-function fotoUrl(req: Request, peca: PecaLoja): string {
+export function fotoUrl(req: Request, peca: PecaLoja): string {
   return `${baseUrl(req)}/loja/foto/${peca.id}?v=${new Date(peca.foto_atualizada_em).getTime()}`;
 }
 
-function layout(req: Request, title: string, content: string, meta = ''): string {
+export function layout(req: Request, title: string, content: string, meta = ''): string {
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -110,6 +112,21 @@ ${meta}
   .filtros a { align-self: center; color: var(--suave); font-size: .9rem; }
   .card .info { display: block; color: var(--suave); font-size: .8rem; margin-bottom: 4px; }
   .total { color: var(--suave); font-size: .9rem; margin: 0 0 12px; }
+  .botao.secundario { background: #fff; color: var(--cor); border: 2px solid var(--cor); }
+  .caixa { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; max-width: 640px; margin: 0 auto 16px; }
+  .caixa h1, .caixa h2 { margin-top: 0; }
+  .resumo { display: flex; gap: 12px; align-items: center; }
+  .resumo img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }
+  .form label { display: block; font-size: .9rem; margin: 12px 0 4px; color: var(--texto); }
+  .form input[type=text], .form input[type=tel], .form input[type=email] { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 1rem; }
+  .form .linha { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .opcao { display: flex; gap: 10px; align-items: flex-start; border: 2px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-top: 8px; cursor: pointer; }
+  .opcao input { margin-top: 3px; }
+  .opcao small { display: block; color: var(--suave); }
+  .erro { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 10px; padding: 12px; }
+  .ok { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; border-radius: 10px; padding: 12px; }
+  .aviso { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; border-radius: 10px; padding: 12px; }
+  button.botao { width: 100%; border: 0; font-size: 1rem; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -122,7 +139,7 @@ ${meta}
 </html>`;
 }
 
-async function buscarPecaDigital(id: string): Promise<PecaLoja | null> {
+export async function buscarPecaDigital(id: string): Promise<PecaLoja | null> {
   if (!/^\d+$/.test(id)) return null;
   const [peca] = await sql`
     SELECT p.id, p.codigo_barras, p.descricao, p.titulo_loja, p.descricao_loja, p.marca, p.cor, p.tamanho,
@@ -147,6 +164,10 @@ async function vitrine(req: Request, res: Response) {
       FROM products p
       JOIN product_photos pp ON pp.product_id = p.id
       WHERE p.canal = 'DIGITAL' AND p.status = 'DISPONIVEL'
+        AND NOT EXISTS (
+          SELECT 1 FROM online_orders oo
+          WHERE oo.product_id = p.id AND oo.status = 'AGUARDANDO_PAGAMENTO' AND oo.expira_em > now()
+        )
         AND (${tipo} = '' OR p.descricao = ${tipo})
         AND (${tamanho} = '' OR p.tamanho = ${tamanho})
         AND (${busca} = '' OR p.titulo_loja ILIKE ${'%' + busca + '%'} OR p.descricao ILIKE ${'%' + busca + '%'}
@@ -211,12 +232,23 @@ async function paginaPeca(req: Request, res: Response) {
     const mensagem = `Olá! Tenho interesse na peça "${titulo}" (cód. ${peca.codigo_barras}): ${url}`;
     const disponivel = peca.status === 'DISPONIVEL';
 
-    const botoes = !disponivel
-      ? '<p class="vendida">Esta peça já foi vendida</p>'
-      : [
-          INSTAGRAM && `<a class="botao" href="https://ig.me/m/${encodeURIComponent(INSTAGRAM)}" rel="noopener">Comprar pelo Instagram</a>`,
-          WHATSAPP && `<a class="botao whatsapp" href="https://wa.me/${WHATSAPP}?text=${encodeURIComponent(mensagem)}" rel="noopener">Comprar pelo WhatsApp</a>`
-        ].filter(Boolean).join('') || '<p class="vendida">Entre em contato com a loja para comprar</p>';
+    const settings = await getStoreSettings();
+    const reservadaAte = disponivel ? await reservaAtivaAte(peca.id) : null;
+    const contato = [
+      WHATSAPP && `<a class="botao whatsapp" href="https://wa.me/${WHATSAPP}?text=${encodeURIComponent(mensagem)}" rel="noopener">${checkoutAtivo(settings) ? 'Tirar dúvidas no WhatsApp' : 'Comprar pelo WhatsApp'}</a>`,
+      INSTAGRAM && `<a class="botao secundario" href="https://ig.me/m/${encodeURIComponent(INSTAGRAM)}" rel="noopener">${checkoutAtivo(settings) ? 'Falar no Instagram' : 'Comprar pelo Instagram'}</a>`
+    ].filter(Boolean).join('');
+
+    let botoes: string;
+    if (!disponivel) {
+      botoes = '<p class="vendida">Esta peça já foi vendida</p>';
+    } else if (reservadaAte) {
+      botoes = '<p class="vendida">Peça reservada para outro cliente que está finalizando o pagamento. Volte em alguns minutos.</p>';
+    } else if (checkoutAtivo(settings)) {
+      botoes = `<a class="botao" href="${baseUrl(req)}/loja/comprar/${peca.id}">Comprar agora · Pix ou cartão</a>${contato}`;
+    } else {
+      botoes = contato || '<p class="vendida">Entre em contato com a loja para comprar</p>';
+    }
 
     const detalhes = [
       ['Código', peca.codigo_barras],
@@ -344,7 +376,8 @@ export async function getStatus(req: Request, res: Response) {
       dominio_verificacao_configurado: Boolean(DOMAIN_VERIFICATION),
       url_publica_configurada: Boolean(process.env.PUBLIC_URL),
       pecas_publicadas: contagem.publicadas,
-      pecas_sem_foto: contagem.sem_foto
+      pecas_sem_foto: contagem.sem_foto,
+      checkout_ativo: checkoutAtivo(await getStoreSettings())
     });
   } catch (error) {
     sendError(res, error, 'Erro ao carregar status da loja');

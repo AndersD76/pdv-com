@@ -1,7 +1,126 @@
-import { useQuery } from '@tanstack/react-query';
-import { Globe, Copy, ExternalLink, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Globe, Copy, ExternalLink, CheckCircle2, AlertCircle, Sparkles, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { lojaApi } from '../../services/api';
+import { Button, Input } from '../../components/ui';
+import type { StoreSettings } from '../../types';
+
+// Pagamento (InfinitePay) e formas de entrega da compra online
+function CheckoutSettings() {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({ queryKey: ['loja-config'], queryFn: lojaApi.getConfig });
+  const [form, setForm] = useState<StoreSettings | null>(null);
+
+  useEffect(() => {
+    if (data) setForm(data);
+  }, [data]);
+
+  const salvar = useMutation({
+    mutationFn: (settings: StoreSettings) => lojaApi.saveConfig(settings),
+    onSuccess: (saved) => {
+      toast.success(saved.checkout_ativo ? 'Configuração salva. Compra online ativa!' : 'Configuração salva.');
+      queryClient.invalidateQueries({ queryKey: ['loja-config'] });
+      queryClient.invalidateQueries({ queryKey: ['loja-status'] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  if (!form) return <div className="animate-pulse h-64 bg-gray-200 rounded-xl" />;
+
+  const set = <K extends keyof StoreSettings>(key: K, value: StoreSettings[K]) => setForm({ ...form, [key]: value });
+  const check = (key: 'retirada_ativa' | 'entrega_local_ativa' | 'correios_ativo', label: string) => (
+    <label className="flex items-center gap-2 font-medium text-gray-900">
+      <input type="checkbox" checked={form[key]} onChange={(e) => set(key, e.target.checked)} className="w-4 h-4" />
+      {label}
+    </label>
+  );
+
+  return (
+    <form
+      className="card p-6 space-y-5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        salvar.mutate(form);
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+          <CreditCard className="w-5 h-5" /> Compra online (pagamento automático)
+        </h2>
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${data?.checkout_ativo ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+          {data?.checkout_ativo ? 'Ativa' : 'Desativada'}
+        </span>
+      </div>
+
+      <div>
+        <Input
+          label="InfiniteTag da loja (usuário no app InfinitePay, sem o $)"
+          value={form.infinitepay_handle}
+          onChange={(e) => set('infinitepay_handle', e.target.value.replace(/^\$/, '').trim())}
+          placeholder="ex.: apegadesapega"
+        />
+        <p className="text-xs text-gray-500 mt-1">O cliente paga com Pix ou cartão (até 12x) na tela da InfinitePay, e o dinheiro cai na conta da loja.</p>
+      </div>
+
+      <div className="space-y-2 border-t pt-4">
+        {check('retirada_ativa', 'Retirada na loja (grátis)')}
+        {form.retirada_ativa && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
+            <Input label="Endereço de retirada" value={form.retirada_endereco} onChange={(e) => set('retirada_endereco', e.target.value)} />
+            <Input label="Horário" value={form.retirada_horario} onChange={(e) => set('retirada_horario', e.target.value)} placeholder="ex.: seg a sex, 9h às 18h" />
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2 border-t pt-4">
+        {check('entrega_local_ativa', 'Entrega local (taxa fixa)')}
+        {form.entrega_local_ativa && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
+            <Input label="Cidade atendida" value={form.entrega_local_cidade} onChange={(e) => set('entrega_local_cidade', e.target.value)} />
+            <Input
+              label="Taxa de entrega (R$)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.entrega_local_taxa}
+              onChange={(e) => set('entrega_local_taxa', Number(e.target.value) || 0)}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2 border-t pt-4">
+        {check('correios_ativo', 'Envio pelos Correios (frete fixo para todo o Brasil)')}
+        {form.correios_ativo && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
+            <Input
+              label="Frete fixo (R$)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.correios_taxa}
+              onChange={(e) => set('correios_taxa', Number(e.target.value) || 0)}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Input
+          label="Reserva da peça enquanto o cliente paga (minutos)"
+          type="number"
+          min="10"
+          max="120"
+          value={form.reserva_minutos}
+          onChange={(e) => set('reserva_minutos', Number(e.target.value) || 30)}
+        />
+      </div>
+
+      <Button type="submit" isLoading={salvar.isPending}>Salvar configuração</Button>
+    </form>
+  );
+}
 
 function StatusItem({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
@@ -78,6 +197,8 @@ export default function LojaOnline() {
           <p className="text-xs text-gray-500">{status.ia_configurada ? 'fotografe a peça no cadastro' : 'defina ANTHROPIC_API_KEY no servidor'}</p>
         </div>
       </div>
+
+      <CheckoutSettings />
 
       <div className="card p-6 space-y-4">
         <h2 className="font-semibold text-gray-900">Links</h2>
