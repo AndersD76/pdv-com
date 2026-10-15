@@ -19,9 +19,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           id={inputId}
-          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${
+          className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
             error ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
           } ${className}`}
+          onWheel={props.type === 'number' ? (e) => e.currentTarget.blur() : props.onWheel}
           {...props}
         />
         {error && <p className="mt-1 text-sm text-red-600">{error}</p>}

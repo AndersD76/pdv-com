@@ -91,11 +91,11 @@ function CheckoutSettings() {
       </div>
 
       <div className="space-y-2 border-t pt-4">
-        {check('correios_ativo', 'Envio pelos Correios (frete fixo para todo o Brasil)')}
+        {check('correios_ativo', 'Envio pelos Correios (para todo o Brasil)')}
         {form.correios_ativo && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-6">
             <Input
-              label="Frete fixo (R$)"
+              label="Frete fixo (R$) — deixe 0 para combinar por WhatsApp"
               type="number"
               step="0.01"
               min="0"

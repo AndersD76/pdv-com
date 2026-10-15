@@ -48,7 +48,13 @@ function opcoesEntrega(settings: StoreSettings): Array<{ valor: Entrega; titulo:
     opcoes.push({ valor: 'ENTREGA_LOCAL', titulo: `Entrega em ${settings.entrega_local_cidade}`, detalhe: 'Levamos até você', frete: settings.entrega_local_taxa });
   }
   if (settings.correios_ativo) {
-    opcoes.push({ valor: 'CORREIOS', titulo: 'Envio pelos Correios', detalhe: 'Para todo o Brasil', frete: settings.correios_taxa });
+    const freteCombinado = settings.correios_taxa <= 0;
+    opcoes.push({
+      valor: 'CORREIOS',
+      titulo: 'Envio pelos Correios',
+      detalhe: freteCombinado ? 'Para todo o Brasil · frete combinado por WhatsApp após a compra' : 'Para todo o Brasil',
+      frete: settings.correios_taxa
+    });
   }
   return opcoes;
 }
@@ -113,9 +119,9 @@ function formularioCompra(req: Request, peca: PecaLoja, settings: StoreSettings,
     <label class="opcao">
       <input type="radio" name="entrega" value="${opcao.valor}" ${valores.entrega === opcao.valor || (!valores.entrega && index === 0) ? 'checked' : ''}>
       <span>
-        <strong>${escapeHtml(opcao.titulo)}</strong> · ${opcao.frete > 0 ? `+ ${formatBRL(opcao.frete)}` : 'grátis'}
+        <strong>${escapeHtml(opcao.titulo)}</strong> · ${opcao.frete > 0 ? `+ ${formatBRL(opcao.frete)}` : (opcao.valor === 'CORREIOS' ? 'frete a combinar' : 'grátis')}
         <small>${escapeHtml(opcao.detalhe)}</small>
-        <small>Total: <strong>${formatBRL(round2(peca.valor_venda + opcao.frete))}</strong></small>
+        <small>Total da peça: <strong>${formatBRL(round2(peca.valor_venda + opcao.frete))}</strong>${opcao.valor === 'CORREIOS' && opcao.frete <= 0 ? ' + frete a combinar' : ''}</small>
       </span>
     </label>`).join('');
 
