@@ -1,15 +1,38 @@
 # Andamento do projeto — PDV COM (Apega Desapega Brechó)
 
-Última atualização: 15/10/2026
+Última atualização: 20/10/2026
 
 ## Onde paramos
 
-**Ativação da compra online (InfinitePay) — Passo 1:** descobrir a **InfiniteTag** da loja no app InfinitePay
-(toque no nome/foto ou em Perfil; é o nome que começa com `$`, ex.: `$apegadesapega`).
+**Estoque da planilha antiga carregado no sistema (20/10/2026).** Falta:
 
-O código da compra online já está no ar; só falta configurar.
+1. **Lançar as vendas de 10/10 em diante.** Na planilha usada (`APP_AD_REV_08.xlsm`, salva em 19/10), a última venda
+   lançada na APP-VEN é de 09/10. As peças vendidas depois disso estão como disponíveis no sistema.
+2. **Dia da virada** (parar a planilha e vender só pelo PDV novo): salvar a planilha mais atual na raiz do projeto e
+   rodar a importação de novo (ver "Importação da planilha antiga" abaixo). Ela tira do estoque o que foi vendido.
+   A partir da virada, criar listas novas só no sistema (a numeração continua em L4613).
+3. Depois, seguir os passos da compra online abaixo (InfiniteTag no app InfinitePay).
 
-## Próximos passos (um de cada vez, nesta ordem)
+## Importação da planilha antiga (APP_AD)
+
+Feita em 20/10/2026 a partir de `APP_AD_REV_08.xlsm` (listas recebidas desde 01/01/2026):
+
+- **1.611 peças em estoque** (R$ 159.429), **185 listas** (167 de consignação `L4xxx` + 18 compras da loja `Axxx`,
+  no fornecedor "Loja"), **131 fornecedores** novos e as vendedoras Priscila (ativa), Lais e Cris (inativas),
+  com comissão de 3% como a da Amanda.
+- Ficaram de fora 81 peças sem preço na lista (marcadas como VOLTA, MANCHADO etc.).
+- **Etiquetas antigas funcionam no PDV.** O modelo de etiqueta da planilha pegava o código da aba APP-LIS e o texto
+  da aba APP-L; desde 2024, do item 6 em diante, a etiqueta física tem o código do item seguinte. A importação
+  corrige isso (confirmado em 2.115 de 2.125 vendas de 2026).
+- Scripts em `scripts/importacao-planilha/` (pode rodar de novo; não duplica, atualiza e tira o que foi vendido):
+  ```
+  python scripts/importacao-planilha/extrair.py APP_AD_REV_xx.xlsm --desde 2026-01-01 --saida scripts/importacao-planilha/carga.json
+  DATABASE_URL="$(railway variables --kv | grep '^DATABASE_URL=' | cut -d= -f2-)" node scripts/importacao-planilha/importar.mjs scripts/importacao-planilha/carga.json            # simulação
+  DATABASE_URL="$(railway variables --kv | grep '^DATABASE_URL=' | cut -d= -f2-)" node scripts/importacao-planilha/importar.mjs scripts/importacao-planilha/carga.json --gravar   # grava
+  ```
+  Precisa de Python 3 (sem bibliotecas extras) e do `npm install` na pasta backend.
+
+## Próximos passos da compra online (um de cada vez, nesta ordem)
 
 1. **Ativar a compra online:** menu **Loja Online** → quadro "Compra online (pagamento automático)":
    - InfiniteTag (sem o `$`)
@@ -53,6 +76,7 @@ O código da compra online já está no ar; só falta configurar.
 
 ## Dados
 
+- Em 20/10/2026 o estoque de 2026 da planilha antiga foi importado (ver acima).
 - Em 15/10/2026, a pedido, o estoque foi **zerado** (18.708 peças importadas, listas, venda de teste e os fornecedores
   de teste). Ficaram usuários, fornecedor "Loja", vendedoras, cadastros auxiliares, clientes e DP.
 - **Backup** dessas peças (CSV/JSON + fotos): `backups/2026-10-15-antes-de-zerar/` **somente no PC onde foi feito**

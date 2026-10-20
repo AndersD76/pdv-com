@@ -52,3 +52,7 @@ nul
 
 # Backups locais de dados (não versionar)
 backups/
+
+# Cargas geradas a partir da planilha antiga (dados da loja)
+scripts/importacao-planilha/*.json
+__pycache__/
