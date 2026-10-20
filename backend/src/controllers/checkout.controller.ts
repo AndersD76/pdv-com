@@ -1,14 +1,13 @@
 import express, { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { sql, query, withTransaction } from '../database.js';
 import { HttpError, sendError, round2 } from '../utils/http.js';
 import { getStoreSettings, saveStoreSettings, storeSettingsSchema, checkoutAtivo, StoreSettings } from '../services/storeSettings.js';
 import { createCheckoutLink, checkPayment } from '../services/infinitepay.js';
 import { reservaAtivaAte } from '../services/reservas.js';
-import {
-  layout, escapeHtml, formatBRL, tituloPeca, fotoUrl, baseUrl, buscarPecaDigital, WHATSAPP, LOJA_NOME, PecaLoja
-} from './loja.controller.js';
+import { sql, query, withTransaction, Tx } from '../database.js';
+import { buscarPecaDigital } from './loja.controller.js';
+import { layout, escapeHtml, formatBRL, tituloPeca, fotoUrl, baseUrl, icone, WHATSAPP, LOJA_NOME, PecaLoja } from '../views/loja.js';
 
 // Checkout da loja online: o cliente paga pela InfinitePay (Pix ou cartão) e o sistema
 // confirma sozinho, registra a venda e avisa a loja para separar a peça.
@@ -59,11 +58,23 @@ function opcoesEntrega(settings: StoreSettings): Array<{ valor: Entrega; titulo:
   return opcoes;
 }
 
+function cpfValido(cpf: string): boolean {
+  if (!/^\d{11}$/.test(cpf) || /^(\d)\1{10}$/.test(cpf)) return false;
+  const digito = (n: number) => {
+    const soma = cpf.slice(0, n).split('').reduce((acc, d, i) => acc + Number(d) * (n + 1 - i), 0);
+    return ((soma * 10) % 11) % 10;
+  };
+  return digito(9) === Number(cpf[9]) && digito(10) === Number(cpf[10]);
+}
+
+const formatarCpf = (cpf: string) => cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+
 const normalizarCidade = (cidade: string) => cidade.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
 
 const formSchema = z.object({
   nome: z.string().trim().min(3, 'Informe seu nome completo').max(120),
   telefone: z.string().transform((v) => v.replace(/\D/g, '')).refine((v) => v.length >= 10 && v.length <= 13, 'Informe um WhatsApp válido com DDD'),
+  cpf: z.string().optional().transform((v) => (v ?? '').replace(/\D/g, '')).refine((v) => !v || cpfValido(v), 'CPF inválido'),
   email: z.string().trim().email('E-mail inválido').max(200).optional().or(z.literal('')),
   entrega: z.enum(['RETIRADA', 'ENTREGA_LOCAL', 'CORREIOS'], { errorMap: () => ({ message: 'Escolha como quer receber a peça' }) }),
   cep: z.string().transform((v) => v.replace(/\D/g, '')).optional(),
@@ -106,63 +117,114 @@ function registrarTentativa(ip: string) {
 function resumoPeca(req: Request, peca: PecaLoja): string {
   return `
     <div class="resumo">
-      <img src="${escapeHtml(fotoUrl(req, peca))}" alt="">
-      <div><strong>${escapeHtml(tituloPeca(peca))}</strong><br><span class="preco">${formatBRL(peca.valor_venda)}</span></div>
+      <img src="${escapeHtml(fotoUrl(req, peca))}" alt="" width="88" height="110">
+      <div><strong>${escapeHtml(tituloPeca(peca))}</strong>
+        <span class="preco">${formatBRL(peca.valor_venda)}</span></div>
     </div>`;
 }
 
+// Tela de status (peça indisponível, erro, pedido): ícone, título, texto e ações
+function telaStatus(opcoes: { icone: string; alerta?: boolean; titulo: string; texto: string; corpo?: string; acoes?: string }): string {
+  return `
+    <section class="container pagina">
+      <div class="status">
+        <div class="status-icone${opcoes.alerta ? ' alerta' : ''}">${icone(opcoes.icone)}</div>
+        <h1>${escapeHtml(opcoes.titulo)}</h1>
+        <p class="sub">${escapeHtml(opcoes.texto)}</p>
+        ${opcoes.corpo ? `<div class="bloco">${opcoes.corpo}</div>` : ''}
+        ${opcoes.acoes ?? ''}
+      </div>
+    </section>`;
+}
+
+const pecaNaoEncontrada = (req: Request) => telaStatus({
+  icone: 'etiqueta', titulo: 'Peça não encontrada', texto: 'Ela pode ter sido vendida ou o link está incompleto.',
+  acoes: `<a class="botao" style="display:inline-flex;width:auto" href="${baseUrl(req)}/loja">Ver peças disponíveis</a>`
+});
+
 function formularioCompra(req: Request, peca: PecaLoja, settings: StoreSettings, valores: FormData = {}, erro = ''): string {
   const campo = (nome: keyof FormData, rotulo: string, tipo = 'text', extra = '') =>
-    `<label for="${nome}">${rotulo}</label><input type="${tipo}" id="${nome}" name="${nome}" value="${escapeHtml(valores[nome] ?? '')}" ${extra}>`;
+    `<div class="campo"><label for="${nome}">${rotulo}</label><input type="${tipo}" id="${nome}" name="${nome}" value="${escapeHtml(valores[nome] ?? '')}" ${extra}></div>`;
 
-  const opcoes = opcoesEntrega(settings).map((opcao, index) => `
+  const opcoes = opcoesEntrega(settings).map((opcao, index) => {
+    const freteCombinado = opcao.valor === 'CORREIOS' && opcao.frete <= 0;
+    return `
     <label class="opcao">
       <input type="radio" name="entrega" value="${opcao.valor}" ${valores.entrega === opcao.valor || (!valores.entrega && index === 0) ? 'checked' : ''}>
-      <span>
-        <strong>${escapeHtml(opcao.titulo)}</strong> · ${opcao.frete > 0 ? `+ ${formatBRL(opcao.frete)}` : (opcao.valor === 'CORREIOS' ? 'frete a combinar' : 'grátis')}
+      <span class="opcao-corpo">
+        <span class="opcao-topo"><span>${escapeHtml(opcao.titulo)}</span><span>${opcao.frete > 0 ? `+ ${formatBRL(opcao.frete)}` : (freteCombinado ? 'a combinar' : 'grátis')}</span></span>
         <small>${escapeHtml(opcao.detalhe)}</small>
-        <small>Total da peça: <strong>${formatBRL(round2(peca.valor_venda + opcao.frete))}</strong>${opcao.valor === 'CORREIOS' && opcao.frete <= 0 ? ' + frete a combinar' : ''}</small>
+        <small>Total: <strong>${formatBRL(round2(peca.valor_venda + opcao.frete))}</strong>${freteCombinado ? ' + frete' : ''}</small>
       </span>
-    </label>`).join('');
+    </label>`;
+  }).join('');
 
   const precisaEndereco = settings.entrega_local_ativa || settings.correios_ativo;
 
   return `
-    <div class="caixa">
-      <h1>Finalizar compra</h1>
-      ${resumoPeca(req, peca)}
-    </div>
-    <form class="caixa form" method="post" action="${baseUrl(req)}/loja/comprar/${peca.id}">
-      ${erro ? `<p class="erro">${escapeHtml(erro)}</p>` : ''}
-      <h2>Seus dados</h2>
-      ${campo('nome', 'Nome completo', 'text', 'required autocomplete="name"')}
-      ${campo('telefone', 'WhatsApp com DDD', 'tel', 'required autocomplete="tel" inputmode="tel"')}
-      ${campo('email', 'E-mail (opcional, para o comprovante)', 'email', 'autocomplete="email"')}
-      <h2 style="margin-top:20px">Como quer receber?</h2>
-      ${opcoes}
-      ${precisaEndereco ? `
-        <h2 style="margin-top:20px">Endereço de entrega</h2>
-        <p class="total">Preencha apenas se escolheu entrega ou Correios.</p>
-        <div class="linha">
-          <div>${campo('cep', 'CEP', 'text', 'inputmode="numeric" autocomplete="postal-code"')}</div>
-          <div>${campo('uf', 'Estado (UF)', 'text', 'maxlength="2" autocomplete="address-level1"')}</div>
-        </div>
-        ${campo('cidade', 'Cidade', 'text', 'autocomplete="address-level2"')}
-        ${campo('endereco', 'Rua', 'text', 'autocomplete="address-line1"')}
-        <div class="linha">
-          <div>${campo('numero', 'Número')}</div>
-          <div>${campo('complemento', 'Complemento')}</div>
-        </div>
-        ${campo('bairro', 'Bairro')}` : ''}
-      <p class="total" style="margin-top:16px">A peça fica reservada para você por ${settings.reserva_minutos} minutos enquanto o pagamento é concluído.</p>
-      <button class="botao" type="submit">Ir para o pagamento · Pix ou cartão</button>
-    </form>`;
+    <section class="container pagina">
+      <a class="voltar" href="${baseUrl(req)}/loja/p/${peca.id}">${icone('voltar')} Voltar para a peça</a>
+      <h1 class="titulo-pagina">Finalizar compra</h1>
+      <div class="checkout">
+        <form method="post" action="${baseUrl(req)}/loja/comprar/${peca.id}">
+          ${erro ? `<p class="erro">${escapeHtml(erro)}</p>` : ''}
+          <div class="bloco">
+            <h2><span class="passo">1</span> Seus dados</h2>
+            <p class="ajuda">Usamos seu WhatsApp para avisar sobre o pedido.</p>
+            ${campo('nome', 'Nome completo', 'text', 'required autocomplete="name"')}
+            <div class="linha">
+              ${campo('telefone', 'WhatsApp com DDD', 'tel', 'required autocomplete="tel" inputmode="tel" placeholder="(54) 99999-9999"')}
+              ${campo('cpf', 'CPF (opcional)', 'text', 'inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"')}
+            </div>
+            ${campo('email', 'E-mail (opcional, para o comprovante)', 'email', 'autocomplete="email"')}
+          </div>
+          <div class="bloco">
+            <h2><span class="passo">2</span> Como quer receber?</h2>
+            ${opcoes}
+          </div>
+          ${precisaEndereco ? `
+          <div class="bloco bloco-endereco">
+            <h2><span class="passo">3</span> Endereço de entrega</h2>
+            <p class="ajuda">Para onde enviamos a sua peça.</p>
+            <div class="linha">
+              ${campo('cep', 'CEP', 'text', 'inputmode="numeric" autocomplete="postal-code" placeholder="99000-000"')}
+              ${campo('uf', 'Estado (UF)', 'text', 'maxlength="2" autocomplete="address-level1" placeholder="RS"')}
+            </div>
+            ${campo('cidade', 'Cidade', 'text', 'autocomplete="address-level2"')}
+            ${campo('endereco', 'Rua', 'text', 'autocomplete="address-line1"')}
+            <div class="linha">
+              ${campo('numero', 'Número')}
+              ${campo('complemento', 'Complemento')}
+            </div>
+            ${campo('bairro', 'Bairro')}
+          </div>` : ''}
+          <button class="botao" type="submit">${icone('cadeado')} Ir para o pagamento</button>
+          <p class="nota">${icone('relogio')} A peça fica reservada para você por ${settings.reserva_minutos} minutos enquanto o pagamento é concluído.</p>
+        </form>
+        <aside class="checkout-lateral">
+          <div class="bloco">
+            <h2>Seu pedido</h2>
+            ${resumoPeca(req, peca)}
+            <dl class="totais">
+              <div><dt>Peça</dt><dd>${formatBRL(peca.valor_venda)}</dd></div>
+              <div class="total-generico"><dt>Entrega</dt><dd>conforme a opção escolhida</dd></div>
+              ${opcoesEntrega(settings).map((opcao) => {
+                const combinado = opcao.valor === 'CORREIOS' && opcao.frete <= 0;
+                return `<div class="total-op" data-op="${opcao.valor}"><dt>${escapeHtml(opcao.titulo)}</dt><dd>${opcao.frete > 0 ? formatBRL(opcao.frete) : (combinado ? 'a combinar' : 'grátis')}</dd></div>
+              <div class="total-op total-final" data-op="${opcao.valor}"><dt>Total</dt><dd>${formatBRL(round2(peca.valor_venda + opcao.frete))}${combinado ? ' + frete' : ''}</dd></div>`;
+              }).join('')}
+            </dl>
+            <p class="nota">${icone('escudo')} Pagamento por Pix ou cartão em até 12x na tela segura da InfinitePay. A confirmação é automática.</p>
+          </div>
+        </aside>
+      </div>
+    </section>`;
 }
 
 async function paginaCompra(req: Request, res: Response) {
   try {
     const peca = await buscarPecaDigital(req.params.id);
-    if (!peca) return res.status(404).send(layout(req, LOJA_NOME, '<p class="vazio">Peça não encontrada.</p>'));
+    if (!peca) return res.status(404).send(layout(req, LOJA_NOME, pecaNaoEncontrada(req)));
 
     const settings = await getStoreSettings();
     let aviso = '';
@@ -171,16 +233,58 @@ async function paginaCompra(req: Request, res: Response) {
     else if (await reservaAtivaAte(peca.id)) aviso = 'Esta peça está reservada para outro cliente que está finalizando o pagamento. Volte em alguns minutos.';
 
     if (aviso) {
-      const contato = WHATSAPP ? `<a class="botao whatsapp" href="https://wa.me/${WHATSAPP}" rel="noopener">Falar com a loja</a>` : '';
-      return res.send(layout(req, LOJA_NOME, `<div class="caixa">${resumoPeca(req, peca)}<p class="aviso">${escapeHtml(aviso)}</p>${contato}</div>`));
+      const contato = WHATSAPP ? `<a class="botao secundario" href="https://wa.me/${WHATSAPP}" rel="noopener">${icone('conversa')} Falar com a loja</a>` : '';
+      return res.send(layout(req, LOJA_NOME, telaStatus({
+        icone: 'alerta', alerta: true, titulo: 'Compra indisponível', texto: aviso, corpo: resumoPeca(req, peca),
+        acoes: `<a class="botao" href="${baseUrl(req)}/loja">Ver outras peças</a>${contato}`
+      }), { settings }));
     }
 
     res.setHeader('Cache-Control', 'no-store');
-    res.send(layout(req, `Comprar | ${LOJA_NOME}`, formularioCompra(req, peca, settings)));
+    res.send(layout(req, `Finalizar compra | ${LOJA_NOME}`, formularioCompra(req, peca, settings), { settings }));
   } catch (error) {
     console.error('Erro ao abrir a compra:', error);
     res.status(500).send('Erro ao carregar a página de compra');
   }
+}
+
+type DadosCompra = z.output<typeof formSchema>;
+
+// Pequeno cadastro: cada compra online cria ou atualiza a cliente em Clientes (pelo CPF ou pelo WhatsApp)
+async function salvarCliente(tx: Tx, dados: DadosCompra): Promise<number> {
+  const comEndereco = dados.entrega !== 'RETIRADA';
+  const endereco = comEndereco
+    ? [`${dados.endereco}, ${dados.numero}`, dados.complemento, dados.bairro].filter(Boolean).join(' - ')
+    : null;
+  const telefoneLocal = dados.telefone.replace(/^55(?=\d{10,11}$)/, '');
+  const existente = (dados.cpf
+    ? await tx.queryOne<{ id: number }>(`SELECT id FROM customers WHERE regexp_replace(COALESCE(cpf, ''), '\\D', '', 'g') = $1`, [dados.cpf])
+    : null)
+    ?? await tx.queryOne<{ id: number }>(
+      `SELECT id FROM customers WHERE regexp_replace(COALESCE(telefone, ''), '\\D', '', 'g') IN ($1, $2) ORDER BY id LIMIT 1`,
+      [telefoneLocal, `55${telefoneLocal}`]
+    );
+
+  const valores = [
+    dados.nome, dados.cpf ? formatarCpf(dados.cpf) : null, telefoneLocal, dados.email || null,
+    endereco, comEndereco ? dados.cidade : null, comEndereco ? dados.uf : null, comEndereco ? dados.cep : null
+  ];
+  if (existente) {
+    await tx.query(
+      `UPDATE customers SET nome = $2, cpf = COALESCE($3, cpf), telefone = $4, email = COALESCE($5, email),
+         endereco = COALESCE($6, endereco), cidade = COALESCE($7, cidade), estado = COALESCE($8, estado), cep = COALESCE($9, cep),
+         updated_at = now()
+       WHERE id = $1`,
+      [existente.id, ...valores]
+    );
+    return existente.id;
+  }
+  const novo = await tx.queryOne<{ id: number }>(
+    `INSERT INTO customers (nome, cpf, telefone, email, endereco, cidade, estado, cep, observacoes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Cadastro pela loja online') RETURNING id`,
+    valores
+  );
+  return novo!.id;
 }
 
 async function criarPedido(req: Request, res: Response) {
@@ -190,7 +294,7 @@ async function criarPedido(req: Request, res: Response) {
 
   try {
     peca = await buscarPecaDigital(req.params.id);
-    if (!peca) return res.status(404).send(layout(req, LOJA_NOME, '<p class="vazio">Peça não encontrada.</p>'));
+    if (!peca) return res.status(404).send(layout(req, LOJA_NOME, pecaNaoEncontrada(req)));
 
     settings = await getStoreSettings();
     if (!checkoutAtivo(settings)) throw new HttpError(503, 'A compra online está temporariamente indisponível.');
@@ -222,15 +326,16 @@ async function criarPedido(req: Request, res: Response) {
       if (reservada) throw new HttpError(409, 'Esta peça está reservada para outro cliente. Volte em alguns minutos.');
 
       const frete = round2(opcao.frete);
+      const clienteId = await salvarCliente(tx, dados);
       return tx.queryOne<OnlineOrder>(
         `INSERT INTO online_orders (
            codigo, order_nsu, product_id, valor_produto, valor_frete, valor_total, entrega,
            cliente_nome, cliente_telefone, cliente_email, cep, endereco, numero, complemento, bairro, cidade, uf,
-           expira_em, ip
+           expira_em, ip, cliente_id
          ) VALUES (
            'P' || LPAD(nextval('online_orders_codigo_seq')::text, 5, '0'), $1, $2, $3, $4, $5, $6,
            $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-           now() + make_interval(mins => $17), $18
+           now() + make_interval(mins => $17), $18, $19
          ) RETURNING *`,
         [
           crypto.randomUUID(), pecaId, produto.valor_venda, frete, round2(produto.valor_venda + frete), dados.entrega,
@@ -239,7 +344,7 @@ async function criarPedido(req: Request, res: Response) {
           dados.entrega === 'RETIRADA' ? null : dados.numero, dados.entrega === 'RETIRADA' ? null : (dados.complemento || null),
           dados.entrega === 'RETIRADA' ? null : dados.bairro, dados.entrega === 'RETIRADA' ? null : dados.cidade,
           dados.entrega === 'RETIRADA' ? null : dados.uf,
-          reservaMinutos, req.ip || null
+          reservaMinutos, req.ip || null, clienteId
         ]
       );
     });
@@ -293,9 +398,12 @@ async function criarPedido(req: Request, res: Response) {
     }
 
     if (peca && settings && checkoutAtivo(settings) && status === 400) {
-      return res.status(400).send(layout(req, `Comprar | ${LOJA_NOME}`, formularioCompra(req, peca, settings, valores, mensagem)));
+      return res.status(400).send(layout(req, `Finalizar compra | ${LOJA_NOME}`, formularioCompra(req, peca, settings, valores, mensagem), { settings }));
     }
-    res.status(status).send(layout(req, LOJA_NOME, `<div class="caixa"><p class="erro">${escapeHtml(mensagem)}</p><a class="botao secundario" href="${baseUrl(req)}/loja">Voltar à loja</a></div>`));
+    res.status(status).send(layout(req, LOJA_NOME, telaStatus({
+      icone: 'alerta', alerta: true, titulo: 'Não foi possível continuar', texto: mensagem,
+      acoes: `<a class="botao secundario" style="display:inline-flex;width:auto" href="${baseUrl(req)}/loja">Voltar à loja</a>`
+    }), { settings }));
   }
 }
 
@@ -391,7 +499,7 @@ async function webhookInfinitepay(req: Request, res: Response) {
 async function paginaPedido(req: Request, res: Response) {
   try {
     const orderNsu = req.params.nsu;
-    if (!UUID_RE.test(orderNsu)) return res.status(404).send(layout(req, LOJA_NOME, '<p class="vazio">Pedido não encontrado.</p>'));
+    if (!UUID_RE.test(orderNsu)) return res.status(404).send(layout(req, LOJA_NOME, telaStatus({ icone: 'alerta', alerta: true, titulo: 'Pedido não encontrado', texto: 'Confira o link recebido ou fale com a loja.' })));
 
     const transactionNsu = typeof req.query.transaction_nsu === 'string' ? req.query.transaction_nsu : '';
     const slug = typeof req.query.slug === 'string' ? req.query.slug : '';
@@ -406,7 +514,7 @@ async function paginaPedido(req: Request, res: Response) {
       FROM online_orders o JOIN products p ON p.id = o.product_id
       WHERE o.order_nsu = ${orderNsu}
     ` as Array<OnlineOrder & { descricao: string; titulo_loja: string | null; marca: string | null; tamanho: string | null; pago_em: Date | null }>;
-    if (!pedido) return res.status(404).send(layout(req, LOJA_NOME, '<p class="vazio">Pedido não encontrado.</p>'));
+    if (!pedido) return res.status(404).send(layout(req, LOJA_NOME, telaStatus({ icone: 'alerta', alerta: true, titulo: 'Pedido não encontrado', texto: 'Confira o link recebido ou fale com a loja.' })));
 
     const settings = await getStoreSettings();
     const titulo = pedido.titulo_loja || pedido.descricao;
@@ -417,29 +525,46 @@ async function paginaPedido(req: Request, res: Response) {
     }[pedido.entrega];
     const expirado = pedido.status === 'AGUARDANDO_PAGAMENTO' && new Date(pedido.expira_em).getTime() < Date.now();
 
-    let corpo: string;
+    const contato = WHATSAPP
+      ? `<a class="botao secundario" href="https://wa.me/${WHATSAPP}?text=${encodeURIComponent(`Olá! Sobre o pedido ${pedido.codigo}`)}" rel="noopener">${icone('conversa')} Falar com a loja</a>`
+      : '';
+    const detalhesPedido = `
+      <dl class="totais" style="margin-top:0;padding-top:0;border-top:0">
+        <div><dt>Pedido</dt><dd><strong>${escapeHtml(pedido.codigo)}</strong></dd></div>
+        <div><dt>Peça</dt><dd>${escapeHtml(titulo)}</dd></div>
+        <div><dt>Total</dt><dd>${formatBRL(pedido.valor_total)}</dd></div>
+      </dl>`;
+
+    let tela: string;
     let refresh = '';
     if (['PAGO', 'SEPARADO', 'ENTREGUE'].includes(pedido.status)) {
-      corpo = `<p class="ok"><strong>Pagamento confirmado!</strong> Obrigado pela compra.</p>
-        <p>Pedido <strong>${escapeHtml(pedido.codigo)}</strong> · ${escapeHtml(titulo)} · ${formatBRL(pedido.valor_total)}</p>
-        <p>${escapeHtml(entrega)}</p>
-        ${pedido.receipt_url ? `<a class="botao secundario" href="${escapeHtml(pedido.receipt_url)}" rel="noopener">Ver comprovante</a>` : ''}`;
+      tela = telaStatus({
+        icone: 'check', titulo: 'Pagamento confirmado!', texto: 'Obrigado pela compra. A peça já é sua.',
+        corpo: `${detalhesPedido}<p class="nota">${icone(pedido.entrega === 'RETIRADA' ? 'local' : 'caminhao')} ${escapeHtml(entrega)}</p>`,
+        acoes: `${pedido.receipt_url ? `<a class="botao" href="${escapeHtml(pedido.receipt_url)}" rel="noopener">Ver comprovante</a>` : ''}${contato}`
+      });
     } else if (pedido.status === 'PAGO_SEM_ESTOQUE') {
-      corpo = `<p class="aviso">Recebemos seu pagamento, mas a peça foi vendida antes da confirmação. A loja vai entrar em contato pelo WhatsApp para devolver o valor.</p>
-        <p>Pedido <strong>${escapeHtml(pedido.codigo)}</strong></p>`;
+      tela = telaStatus({
+        icone: 'alerta', alerta: true, titulo: 'Pagamento recebido',
+        texto: 'A peça foi vendida antes da confirmação do seu pagamento. A loja vai falar com você pelo WhatsApp para devolver o valor.',
+        corpo: detalhesPedido, acoes: contato
+      });
     } else if (pedido.status === 'CANCELADO' || expirado) {
-      corpo = `<p class="aviso">Este pedido não foi pago a tempo e a reserva expirou.</p>
-        <a class="botao" href="${baseUrl(req)}/loja/p/${pedido.product_id}">Ver a peça novamente</a>`;
+      tela = telaStatus({
+        icone: 'relogio', alerta: true, titulo: 'Reserva expirada', texto: 'Este pedido não foi pago a tempo e a peça foi liberada.',
+        acoes: `<a class="botao" href="${baseUrl(req)}/loja/p/${pedido.product_id}">Ver a peça novamente</a>${contato}`
+      });
     } else {
       refresh = '<meta http-equiv="refresh" content="10">';
-      corpo = `<p class="aviso">Aguardando a confirmação do pagamento… Esta página atualiza sozinha.</p>
-        <p>Pedido <strong>${escapeHtml(pedido.codigo)}</strong> · ${formatBRL(pedido.valor_total)}</p>
-        ${pedido.checkout_url ? `<a class="botao" href="${escapeHtml(pedido.checkout_url)}" rel="noopener">Voltar ao pagamento</a>` : ''}`;
+      tela = telaStatus({
+        icone: 'relogio', titulo: 'Aguardando o pagamento', texto: 'Assim que a InfinitePay confirmar, esta página atualiza sozinha.',
+        corpo: detalhesPedido,
+        acoes: `${pedido.checkout_url ? `<a class="botao" href="${escapeHtml(pedido.checkout_url)}" rel="noopener">Voltar ao pagamento</a>` : ''}${contato}`
+      });
     }
 
-    const contato = WHATSAPP ? `<a class="botao whatsapp" href="https://wa.me/${WHATSAPP}?text=${encodeURIComponent(`Olá! Sobre o pedido ${pedido.codigo}`)}" rel="noopener">Falar com a loja</a>` : '';
     res.setHeader('Cache-Control', 'no-store');
-    res.send(layout(req, `Pedido ${pedido.codigo} | ${LOJA_NOME}`, `<div class="caixa"><h1>Pedido ${escapeHtml(pedido.codigo)}</h1>${corpo}${contato}</div>`, refresh));
+    res.send(layout(req, `Pedido ${pedido.codigo} | ${LOJA_NOME}`, tela, { settings, meta: refresh }));
   } catch (error) {
     console.error('Erro ao exibir pedido:', error);
     res.status(500).send('Erro ao carregar o pedido');

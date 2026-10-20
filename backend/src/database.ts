@@ -553,6 +553,8 @@ export async function initializeDatabase(): Promise<void> {
     )
   `;
   await client`CREATE INDEX IF NOT EXISTS idx_online_orders_product_id ON online_orders(product_id)`;
+  // Cliente cadastrada a partir da compra online
+  await client`ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS cliente_id INTEGER REFERENCES customers(id)`;
   await client`CREATE INDEX IF NOT EXISTS idx_online_orders_status ON online_orders(status)`;
   await syncCodeSequence('online_orders_codigo_seq', 'online_orders', 'P');
 

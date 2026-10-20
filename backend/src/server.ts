@@ -79,6 +79,37 @@ app.use('/loja', lojaRouter);
 // Checkout (compra com pagamento pela InfinitePay)
 app.use('/loja', checkoutRouter);
 
+// Buscadores: só a loja é pública; o sistema interno fica fora do Google
+app.get('/robots.txt', (req, res) => {
+  const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+  res.type('text/plain').send([
+    'User-agent: *',
+    'Allow: /$',
+    'Allow: /loja',
+    'Disallow: /loja/comprar',
+    'Disallow: /loja/pedido',
+    'Disallow: /loja/webhook',
+    'Disallow: /',
+    `Sitemap: ${base}/loja/sitemap.xml`,
+    ''
+  ].join('\n'));
+});
+
+// No domínio da loja, quem chega pela raiz (cliente, sem sessão do sistema) vai direto para a vitrine
+const PUBLIC_HOST = (() => {
+  try {
+    return process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : '';
+  } catch {
+    return '';
+  }
+})();
+app.get('/', (req, res, next) => {
+  if (PUBLIC_HOST && req.hostname === PUBLIC_HOST && !/(?:^|;\s*)pdv_session=/.test(req.headers.cookie || '')) {
+    return res.redirect(302, '/loja');
+  }
+  next();
+});
+
 // Rota de health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
