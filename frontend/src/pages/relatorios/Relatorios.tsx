@@ -43,6 +43,7 @@ const paymentLabels: Record<PaymentMethod, string> = {
   PIX: 'Pix',
   CARTAO_CREDITO: 'Crédito',
   CARTAO_DEBITO: 'Débito',
+  OUTRO: 'Outro',
 };
 
 type TabType = 'vendas' | 'comissoes' | 'fornecedores';
@@ -222,7 +223,7 @@ export default function Relatorios() {
       </div>
 
       {/* Resumo do dia */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-1 gap-4 ${dailyReport?.totals?.total_outro ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>
         <div className="card p-4">
           <p className="text-sm text-gray-600">Vendas Hoje</p>
           <p className="text-2xl font-bold text-green-600">
@@ -244,6 +245,12 @@ export default function Relatorios() {
             {formatCurrency((dailyReport?.totals?.total_credito || 0) + (dailyReport?.totals?.total_debito || 0))}
           </p>
         </div>
+        {Boolean(dailyReport?.totals?.total_outro) && (
+          <div className="card p-4">
+            <p className="text-sm text-gray-600">Outros (troca, crédito, bônus)</p>
+            <p className="text-xl font-semibold">{formatCurrency(dailyReport?.totals?.total_outro || 0)}</p>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}

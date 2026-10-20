@@ -15,12 +15,18 @@
 
 ## Importação da planilha antiga (APP_AD)
 
-Feita em 20/10/2026 a partir de `APP_AD_REV_08.xlsm` (listas recebidas desde 01/01/2026):
+Feita em 20/10/2026 a partir de `APP_AD_REV_08.xlsm` (período desde 01/01/2026):
 
-- **1.611 peças em estoque** (R$ 159.429), **185 listas** (167 de consignação `L4xxx` + 18 compras da loja `Axxx`,
-  no fornecedor "Loja"), **131 fornecedores** novos e as vendedoras Priscila (ativa), Lais e Cris (inativas),
-  com comissão de 3% como a da Amanda.
-- Ficaram de fora 81 peças sem preço na lista (marcadas como VOLTA, MANCHADO etc.).
+- **2.585 peças em estoque** (R$ 256.544): listas recebidas em 2026, inclusive as compras da loja (`Axxx`, no
+  fornecedor "Loja"), que não têm data na planilha (data estimada pelas listas vizinhas).
+- **4.771 vendas de 2026** (R$ 407.465, uma venda por peça, como na APP-VEN), com vendedora e **comissões**
+  (3%, todas como pendentes: marcar como pagas em Relatórios → Comissões o que já foi pago).
+  Forma de pagamento: D = Dinheiro, CD = Débito, CC = Crédito; troca, crédito na loja, bônus, "DEVE" etc. entram
+  como **"Outro"**, com o texto original no nome do cliente.
+- Peças vendidas com a situação de pagamento ao fornecedor (PAGO/ENVELOPE na lista = pago): R$ 30.501 a pagar.
+- Listas antigas que tiveram vendas em 2026 entram só com as peças vendidas (FINALIZADA).
+- 311 fornecedores; vendedoras Priscila (ativa), Lais e Cris (inativas).
+- Ficaram de fora 87 peças sem preço na lista (marcadas como VOLTA, MANCHADO etc.).
 - **Etiquetas antigas funcionam no PDV.** O modelo de etiqueta da planilha pegava o código da aba APP-LIS e o texto
   da aba APP-L; desde 2024, do item 6 em diante, a etiqueta física tem o código do item seguinte. A importação
   corrige isso (confirmado em 2.115 de 2.125 vendas de 2026).

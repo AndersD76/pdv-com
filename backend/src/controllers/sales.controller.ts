@@ -295,7 +295,8 @@ export async function getDailySalesReport(req: Request, res: Response) {
         COALESCE(SUM(CASE WHEN forma_pagamento = 'DINHEIRO' THEN valor_final ELSE 0 END), 0) as total_dinheiro,
         COALESCE(SUM(CASE WHEN forma_pagamento = 'PIX' THEN valor_final ELSE 0 END), 0) as total_pix,
         COALESCE(SUM(CASE WHEN forma_pagamento = 'CARTAO_CREDITO' THEN valor_final ELSE 0 END), 0) as total_credito,
-        COALESCE(SUM(CASE WHEN forma_pagamento = 'CARTAO_DEBITO' THEN valor_final ELSE 0 END), 0) as total_debito
+        COALESCE(SUM(CASE WHEN forma_pagamento = 'CARTAO_DEBITO' THEN valor_final ELSE 0 END), 0) as total_debito,
+        COALESCE(SUM(CASE WHEN forma_pagamento = 'OUTRO' THEN valor_final ELSE 0 END), 0) as total_outro
       FROM sales
       WHERE status = 'CONCLUIDA'
         AND (data_venda AT TIME ZONE ${APP_TIMEZONE})::date = ${targetDate}::date

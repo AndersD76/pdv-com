@@ -32,6 +32,7 @@ export default function Dashboard() {
     PIX: 'Pix',
     CARTAO_CREDITO: 'Crédito',
     CARTAO_DEBITO: 'Débito',
+    OUTRO: 'Outro',
   };
 
   if (isLoading) {

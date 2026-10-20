@@ -21,7 +21,8 @@ export enum PaymentMethod {
   DINHEIRO = 'DINHEIRO',
   PIX = 'PIX',
   CARTAO_CREDITO = 'CARTAO_CREDITO',
-  CARTAO_DEBITO = 'CARTAO_DEBITO'
+  CARTAO_DEBITO = 'CARTAO_DEBITO',
+  OUTRO = 'OUTRO'
 }
 
 // Interfaces

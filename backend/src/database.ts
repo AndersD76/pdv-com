@@ -251,7 +251,7 @@ export async function initializeDatabase(): Promise<void> {
       valor_total DECIMAL(10,2) NOT NULL,
       desconto DECIMAL(10,2) DEFAULT 0,
       valor_final DECIMAL(10,2) NOT NULL,
-      forma_pagamento VARCHAR(20) NOT NULL CHECK (forma_pagamento IN ('DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO')),
+      forma_pagamento VARCHAR(20) NOT NULL CHECK (forma_pagamento IN ('DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'OUTRO')),
       cliente_nome VARCHAR(255),
       vendedora_id INTEGER REFERENCES sellers(id),
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -418,6 +418,17 @@ export async function initializeDatabase(): Promise<void> {
   await client`ALTER TABLE sales ADD COLUMN IF NOT EXISTS cancelada_em TIMESTAMPTZ`;
   await client`ALTER TABLE sales ADD COLUMN IF NOT EXISTS cancelada_por INTEGER REFERENCES users(id)`;
   await client`ALTER TABLE sales ADD COLUMN IF NOT EXISTS motivo_cancelamento TEXT`;
+
+  // Forma "OUTRO": vendas importadas da planilha pagas com troca, crédito na loja, bônus etc.
+  const [formaCheck] = await client`
+    SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint
+    WHERE conrelid = 'sales'::regclass AND conname = 'sales_forma_pagamento_check'
+  `;
+  if (!formaCheck || !String(formaCheck.def).includes('OUTRO')) {
+    await client`ALTER TABLE sales DROP CONSTRAINT IF EXISTS sales_forma_pagamento_check`;
+    await client`ALTER TABLE sales ADD CONSTRAINT sales_forma_pagamento_check
+      CHECK (forma_pagamento IN ('DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'OUTRO'))`;
+  }
 
   // Listas: contador de peças para gerar códigos de barras sem repetição
   if (!(await columnExists('consignment_lists', 'ultimo_item'))) {

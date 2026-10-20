@@ -24,7 +24,9 @@ export enum PaymentMethod {
   DINHEIRO = 'DINHEIRO',
   PIX = 'PIX',
   CARTAO_CREDITO = 'CARTAO_CREDITO',
-  CARTAO_DEBITO = 'CARTAO_DEBITO'
+  CARTAO_DEBITO = 'CARTAO_DEBITO',
+  // Troca, crédito na loja, bônus etc. (vendas importadas da planilha)
+  OUTRO = 'OUTRO'
 }
 
 // Interfaces
