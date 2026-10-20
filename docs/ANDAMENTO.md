@@ -11,7 +11,21 @@
 2. **Dia da virada** (parar a planilha e vender só pelo PDV novo): salvar a planilha mais atual na raiz do projeto e
    rodar a importação de novo (ver "Importação da planilha antiga" abaixo). Ela tira do estoque o que foi vendido.
    A partir da virada, criar listas novas só no sistema (a numeração continua em L4613).
-3. Depois, seguir os passos da compra online abaixo (InfiniteTag no app InfinitePay).
+3. A compra online já está ativa (InfiniteTag configurada). Se ainda não foi feito, fazer um teste real de R$ 1.
+   Para a loja encher: cadastrar as peças com foto e marcar **Loja digital** (só essas aparecem na vitrine).
+4. Conferir a comissão das vendedoras (3% foi um padrão) e marcar como pagas as comissões já pagas.
+
+## Loja online (20/10/2026)
+
+- Domínio: **https://loja.apegadesapega.com.br** (`PUBLIC_URL`). Visitante sem sessão que abre a raiz vai para a
+  vitrine; a equipe entra no sistema por **/login**.
+- Visual premium seguindo o MIV (`apega_desapega.pdf` na raiz do projeto, fora do git): verde-sálvia, logo circular
+  em SVG, Libre Baskerville + Barlow (fontes em `backend/assets/loja/fonts`). Código em `backend/src/views/loja.ts`.
+- SEO: descrição, canonical, dados estruturados (Product e ClothingStore), Open Graph, `/loja/sitemap.xml` e
+  `/robots.txt` (só a loja é indexada). Cadastrar o sitemap no Google Search Console.
+- Checkout: CPF opcional, endereço só para entrega/Correios, resumo com frete e total da opção escolhida; cada
+  compra cria ou atualiza a cliente em **Clientes** (pelo CPF ou WhatsApp) e liga ao pedido.
+- Só aparecem na loja peças marcadas como **Loja digital** e com foto.
 
 ## Importação da planilha antiga (APP_AD)
 
